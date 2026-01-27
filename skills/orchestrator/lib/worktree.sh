@@ -91,17 +91,18 @@ create_worktree() {
 
   # Check if branch already exists
   if git show-ref --verify --quiet "refs/heads/$branch_name" 2>/dev/null; then
-    echo "WARNING: Branch $branch_name already exists, using existing branch"
-    git worktree add "$worktree_path" "$branch_name"
+    echo "WARNING: Branch $branch_name already exists, using existing branch" >&2
+    git worktree add "$worktree_path" "$branch_name" >&2
   else
     # Create worktree with new branch from base
     if git show-ref --verify --quiet "refs/remotes/origin/$base_branch" 2>/dev/null; then
-      git worktree add -b "$branch_name" "$worktree_path" "origin/$base_branch"
+      git worktree add -b "$branch_name" "$worktree_path" "origin/$base_branch" >&2
     else
-      git worktree add -b "$branch_name" "$worktree_path" "$base_branch"
+      git worktree add -b "$branch_name" "$worktree_path" "$base_branch" >&2
     fi
   fi
 
+  # Output only the path (git messages go to stderr)
   echo "$worktree_path"
 }
 

@@ -125,9 +125,9 @@ cd "$WORKTREE"
   echo "## Code Statistics"
   echo ""
 
-  TS_COUNT=$(find . -name "*.ts" -o -name "*.tsx" 2>/dev/null | grep -v node_modules | grep -v ".d.ts" | wc -l | tr -d ' ')
-  JS_COUNT=$(find . -name "*.js" -o -name "*.jsx" 2>/dev/null | grep -v node_modules | wc -l | tr -d ' ')
-  PY_COUNT=$(find . -name "*.py" 2>/dev/null | grep -v __pycache__ | wc -l | tr -d ' ')
+  TS_COUNT=$(find . -name "*.ts" -o -name "*.tsx" 2>/dev/null | grep -v node_modules | grep -v ".d.ts" || true | wc -l | tr -d ' ')
+  JS_COUNT=$(find . -name "*.js" -o -name "*.jsx" 2>/dev/null | grep -v node_modules || true | wc -l | tr -d ' ')
+  PY_COUNT=$(find . -name "*.py" 2>/dev/null | grep -v __pycache__ || true | wc -l | tr -d ' ')
   GO_COUNT=$(find . -name "*.go" 2>/dev/null | wc -l | tr -d ' ')
   RS_COUNT=$(find . -name "*.rs" 2>/dev/null | wc -l | tr -d ' ')
 
