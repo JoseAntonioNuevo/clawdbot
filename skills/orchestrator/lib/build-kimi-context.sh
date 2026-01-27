@@ -1,7 +1,16 @@
 #!/bin/bash
 # Build Context for OpenCode/Kimi K2.5 (Implementer)
 # Assembles full context for Kimi to implement the plan
+# Uses AI-powered summarization for large content when needed
 set -euo pipefail
+
+[[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUMMARIZER="$SCRIPT_DIR/summarize-context.sh"
+
+# Threshold for when to summarize (in characters)
+SUMMARIZE_THRESHOLD=${SUMMARIZE_THRESHOLD:-50000}
 
 usage() {
   cat << EOF
@@ -129,11 +138,30 @@ mkdir -p "$(dirname "$OUTPUT")"
         echo "### Iteration $i"
         echo ""
 
-        # What you implemented before (FULL - no truncation)
+        # What you implemented before (with smart summarization for large content)
         if [[ -f "$ITER_DIR/kimi_implementation.md" ]]; then
           echo "#### What You Implemented"
           echo ""
-          cat "$ITER_DIR/kimi_implementation.md"
+          IMPL_CONTENT=$(cat "$ITER_DIR/kimi_implementation.md")
+          IMPL_SIZE=${#IMPL_CONTENT}
+
+          if [[ $IMPL_SIZE -gt $SUMMARIZE_THRESHOLD && -x "$SUMMARIZER" ]]; then
+            echo "> **Note**: Previous implementation was large (${IMPL_SIZE} chars), showing AI summary."
+            echo ""
+            TEMP_IMPL=$(mktemp)
+            TEMP_IMPL_SUM=$(mktemp)
+            echo "$IMPL_CONTENT" > "$TEMP_IMPL"
+            if "$SUMMARIZER" --input "$TEMP_IMPL" --type implementation --output "$TEMP_IMPL_SUM" -q 2>/dev/null; then
+              cat "$TEMP_IMPL_SUM"
+            else
+              echo "$IMPL_CONTENT" | head -c 20000
+              echo ""
+              echo "[... truncated ...]"
+            fi
+            rm -f "$TEMP_IMPL" "$TEMP_IMPL_SUM"
+          else
+            echo "$IMPL_CONTENT"
+          fi
           echo ""
         fi
 

@@ -231,9 +231,43 @@ if [[ -f "$TEMP_OUTPUT" && -s "$TEMP_OUTPUT" ]]; then
         positives: (.positives // [])
       }' "$JSON_EXTRACTED" > "$OUTPUT_FILE"
     else
-      # Failed to extract valid JSON - create error response
-      RAW_OUTPUT=$(cat "$TEMP_OUTPUT" | head -500 | jq -Rs .)
-      cat > "$OUTPUT_FILE" << EOF
+      # Failed to extract valid JSON - try AI-powered normalization
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      NORMALIZER="$SCRIPT_DIR/normalize-output.sh"
+
+      if [[ -x "$NORMALIZER" ]]; then
+        [[ "$QUIET" == "false" ]] && echo "JSON extraction failed, using AI normalizer..."
+        "$NORMALIZER" \
+          --input "$TEMP_OUTPUT" \
+          --schema codex-review \
+          --output "$OUTPUT_FILE" \
+          ${QUIET:+"-q"} || {
+            # Normalizer failed - create error response
+            RAW_OUTPUT=$(cat "$TEMP_OUTPUT" | head -500 | jq -Rs .)
+            cat > "$OUTPUT_FILE" << EOF
+{
+  "approved": false,
+  "summary": "Failed to parse and normalize Codex response",
+  "issues": [
+    {
+      "severity": "critical",
+      "blocking": true,
+      "file": null,
+      "line": null,
+      "message": "Codex output was not valid JSON and normalization failed",
+      "suggestion": "Check Codex configuration or retry"
+    }
+  ],
+  "missing": [],
+  "positives": [],
+  "_raw_output": $RAW_OUTPUT
+}
+EOF
+        }
+      else
+        # No normalizer available - create error response
+        RAW_OUTPUT=$(cat "$TEMP_OUTPUT" | head -500 | jq -Rs .)
+        cat > "$OUTPUT_FILE" << EOF
 {
   "approved": false,
   "summary": "Failed to parse Codex response as JSON",
@@ -252,6 +286,7 @@ if [[ -f "$TEMP_OUTPUT" && -s "$TEMP_OUTPUT" ]]; then
   "_raw_output": $RAW_OUTPUT
 }
 EOF
+      fi
     fi
 
     rm -f "$JSON_EXTRACTED"

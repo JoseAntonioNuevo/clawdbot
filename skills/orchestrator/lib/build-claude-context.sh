@@ -1,7 +1,48 @@
 #!/bin/bash
 # Build Context for Claude Code (Planner)
 # Assembles full context for Claude to create or revise implementation plans
+# Uses AI-powered summarization for large content to stay within context limits
 set -euo pipefail
+
+[[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUMMARIZER="$SCRIPT_DIR/summarize-context.sh"
+
+# Threshold for when to summarize (in characters)
+SUMMARIZE_THRESHOLD=${SUMMARIZE_THRESHOLD:-50000}
+
+# Function to include content with smart summarization
+include_with_summary() {
+  local content="$1"
+  local type="$2"
+  local label="$3"
+  local content_size=${#content}
+
+  if [[ $content_size -gt $SUMMARIZE_THRESHOLD && -x "$SUMMARIZER" ]]; then
+    echo "> **Note**: Content was large (${content_size} chars), showing AI-generated summary."
+    echo ""
+
+    # Create temp file for summarization
+    local temp_input=$(mktemp)
+    local temp_output=$(mktemp)
+    echo "$content" > "$temp_input"
+
+    if "$SUMMARIZER" --input "$temp_input" --type "$type" --output "$temp_output" -q 2>/dev/null; then
+      cat "$temp_output"
+    else
+      # Fallback: show truncated content
+      echo "$content" | head -c 30000
+      echo ""
+      echo "[... content truncated, summarization failed ...]"
+    fi
+
+    rm -f "$temp_input" "$temp_output"
+  else
+    # Content is small enough, include full
+    echo "$content"
+  fi
+}
 
 usage() {
   cat << EOF
@@ -125,11 +166,33 @@ mkdir -p "$(dirname "$OUTPUT")"
     echo "\`\`\`"
     echo ""
 
-    # Show the actual diff (FULL - no truncation for complete context)
+    # Show the actual diff (with smart summarization for large diffs)
     echo "### Code Changes (Diff)"
-    echo "\`\`\`diff"
-    git diff "$BASE_BRANCH"...HEAD 2>/dev/null || echo "(No diff available)"
-    echo "\`\`\`"
+    DIFF_CONTENT=$(git diff "$BASE_BRANCH"...HEAD 2>/dev/null || echo "(No diff available)")
+    DIFF_SIZE=${#DIFF_CONTENT}
+
+    if [[ $DIFF_SIZE -gt $SUMMARIZE_THRESHOLD && -x "$SUMMARIZER" ]]; then
+      echo ""
+      echo "> **Note**: Diff is large (${DIFF_SIZE} chars), showing AI-generated summary."
+      echo ""
+      TEMP_DIFF=$(mktemp)
+      TEMP_SUMMARY=$(mktemp)
+      echo "$DIFF_CONTENT" > "$TEMP_DIFF"
+      if "$SUMMARIZER" --input "$TEMP_DIFF" --type diff --output "$TEMP_SUMMARY" -q 2>/dev/null; then
+        cat "$TEMP_SUMMARY"
+      else
+        echo "\`\`\`diff"
+        echo "$DIFF_CONTENT" | head -c 30000
+        echo ""
+        echo "[... diff truncated, summarization failed ...]"
+        echo "\`\`\`"
+      fi
+      rm -f "$TEMP_DIFF" "$TEMP_SUMMARY"
+    else
+      echo "\`\`\`diff"
+      echo "$DIFF_CONTENT"
+      echo "\`\`\`"
+    fi
   else
     echo "(Worktree not found: $WORKTREE)"
   fi
@@ -159,20 +222,60 @@ mkdir -p "$(dirname "$OUTPUT")"
           echo ""
         fi
 
-        # What Kimi implemented
+        # What Kimi implemented (with smart summarization)
         if [[ -f "$ITER_DIR/kimi_implementation.md" ]]; then
           echo "#### What Was Implemented"
           echo ""
-          cat "$ITER_DIR/kimi_implementation.md"
+          IMPL_CONTENT=$(cat "$ITER_DIR/kimi_implementation.md")
+          IMPL_SIZE=${#IMPL_CONTENT}
+
+          if [[ $IMPL_SIZE -gt $SUMMARIZE_THRESHOLD && -x "$SUMMARIZER" ]]; then
+            echo "> **Note**: Implementation details were large (${IMPL_SIZE} chars), showing AI summary."
+            echo ""
+            TEMP_IMPL=$(mktemp)
+            TEMP_IMPL_SUM=$(mktemp)
+            echo "$IMPL_CONTENT" > "$TEMP_IMPL"
+            if "$SUMMARIZER" --input "$TEMP_IMPL" --type implementation --output "$TEMP_IMPL_SUM" -q 2>/dev/null; then
+              cat "$TEMP_IMPL_SUM"
+            else
+              echo "$IMPL_CONTENT" | head -c 20000
+              echo ""
+              echo "[... truncated ...]"
+            fi
+            rm -f "$TEMP_IMPL" "$TEMP_IMPL_SUM"
+          else
+            echo "$IMPL_CONTENT"
+          fi
           echo ""
         fi
 
-        # Test results
+        # Test results (with smart summarization)
         if [[ -f "$ITER_DIR/test_results.txt" ]]; then
           echo "#### Test Results"
-          echo "\`\`\`"
-          cat "$ITER_DIR/test_results.txt" | head -50
-          echo "\`\`\`"
+          TEST_CONTENT=$(cat "$ITER_DIR/test_results.txt")
+          TEST_SIZE=${#TEST_CONTENT}
+
+          if [[ $TEST_SIZE -gt 20000 && -x "$SUMMARIZER" ]]; then
+            echo ""
+            echo "> **Note**: Test output was large (${TEST_SIZE} chars), showing AI summary."
+            echo ""
+            TEMP_TEST=$(mktemp)
+            TEMP_TEST_SUM=$(mktemp)
+            echo "$TEST_CONTENT" > "$TEMP_TEST"
+            if "$SUMMARIZER" --input "$TEMP_TEST" --type tests --output "$TEMP_TEST_SUM" -q 2>/dev/null; then
+              cat "$TEMP_TEST_SUM"
+            else
+              echo "\`\`\`"
+              echo "$TEST_CONTENT" | head -100
+              echo "[... truncated ...]"
+              echo "\`\`\`"
+            fi
+            rm -f "$TEMP_TEST" "$TEMP_TEST_SUM"
+          else
+            echo "\`\`\`"
+            echo "$TEST_CONTENT"
+            echo "\`\`\`"
+          fi
           echo ""
         fi
 
