@@ -211,8 +211,10 @@ if command -v opencode &>/dev/null; then
     RUN_SUCCESS=true
   # Last resort: direct argument (check size first)
   elif [[ $PROMPT_SIZE -lt 100000 ]]; then
-    timeout 60 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || true
-    RUN_SUCCESS=true
+    if timeout 60 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1; then
+      RUN_SUCCESS=true
+    fi
+    # RUN_SUCCESS stays false if command failed
   fi
 else
   echo "ERROR: opencode not available for normalization" >&2
@@ -238,6 +240,29 @@ FALLBACK
 fi
 
 rm -f "$PROMPT_FILE"
+
+# Check if normalization command was successful
+if [[ "$RUN_SUCCESS" != "true" ]]; then
+  [[ "$QUIET" == "false" ]] && echo "WARNING: Normalization command failed, creating error response"
+  case "$SCHEMA" in
+    codex-review)
+      cat > "$OUTPUT" << 'EOF'
+{
+  "approved": false,
+  "summary": "Normalization command failed",
+  "issues": [{"severity": "critical", "blocking": true, "message": "OpenCode normalization command failed"}],
+  "missing": [],
+  "positives": []
+}
+EOF
+      ;;
+    *)
+      echo '{"error": "normalization_command_failed"}' > "$OUTPUT"
+      ;;
+  esac
+  rm -f "$TEMP_OUTPUT"
+  exit 1
+fi
 
 # Extract JSON from the response
 if [[ -s "$TEMP_OUTPUT" ]]; then

@@ -71,15 +71,40 @@ done
 
 [[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: --output required" >&2; usage >&2; exit 1; }
 
+# Create output directory if needed (do this early so we can write error JSON)
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Helper to write structured error JSON
+write_error_json() {
+  local message="$1"
+  local suggestion="$2"
+  cat > "$OUTPUT_FILE" << EOF
+{
+  "approved": false,
+  "summary": "$message",
+  "issues": [
+    {
+      "severity": "critical",
+      "blocking": true,
+      "file": null,
+      "line": null,
+      "message": "$message",
+      "suggestion": "$suggestion"
+    }
+  ],
+  "missing": [],
+  "positives": []
+}
+EOF
+}
+
 # Check if Codex is installed
 if ! command -v codex &>/dev/null; then
   echo "ERROR: codex is not installed" >&2
   echo "Install with: npm install -g @openai/codex-cli" >&2
+  write_error_json "Codex CLI is not installed" "Install with: npm install -g @openai/codex-cli"
   exit 1
 fi
-
-# Create output directory if needed
-mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 # Change to working directory
 cd "$WORKDIR"
@@ -94,10 +119,12 @@ if [[ -n "$CONTEXT_FILE" ]]; then
   if [[ ! -f "$CONTEXT_FILE" ]]; then
     echo "ERROR: Context file specified but not found: $CONTEXT_FILE" >&2
     echo "Full context is required for orchestrator runs." >&2
+    write_error_json "Context file not found: $CONTEXT_FILE" "Ensure the context file exists before running Codex review"
     exit 1
   fi
   if [[ ! -r "$CONTEXT_FILE" ]]; then
     echo "ERROR: Context file not readable: $CONTEXT_FILE" >&2
+    write_error_json "Context file not readable: $CONTEXT_FILE" "Check file permissions on the context file"
     exit 1
   fi
   [[ "$QUIET" == "false" ]] && echo "Using context from: $CONTEXT_FILE"

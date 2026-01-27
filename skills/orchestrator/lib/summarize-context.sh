@@ -254,8 +254,10 @@ if command -v opencode &>/dev/null; then
     RUN_SUCCESS=true
   # Last resort: direct argument (check size first)
   elif [[ $PROMPT_SIZE -lt 100000 ]]; then
-    timeout 120 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || true
-    RUN_SUCCESS=true
+    if timeout 120 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1; then
+      RUN_SUCCESS=true
+    fi
+    # RUN_SUCCESS stays false if command failed
   fi
 else
   # Fallback: just truncate intelligently (use CONTENT, not INPUT which may be a directory)
