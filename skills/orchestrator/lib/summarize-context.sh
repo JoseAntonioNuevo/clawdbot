@@ -269,20 +269,56 @@ fi
 
 rm -f "$PROMPT_FILE"
 
+# Check if summarization was successful
+if [[ "$RUN_SUCCESS" != "true" ]]; then
+  echo "WARNING: Summarization command failed, using truncated content" >&2
+  head -c 8000 <<< "$CONTENT" > "$OUTPUT"
+  echo "" >> "$OUTPUT"
+  echo "[... content truncated - summarization failed ...]" >> "$OUTPUT"
+  rm -f "$TEMP_OUTPUT"
+  exit 0
+fi
+
+# Validate output - check for common error patterns
+is_error_output() {
+  local content="$1"
+  # Check for common error indicators
+  if echo "$content" | grep -qiE "^(error|fatal|exception|traceback|failed|unauthorized|forbidden)"; then
+    return 0
+  fi
+  # Check if output is too short (likely an error message)
+  if [[ ${#content} -lt 50 ]]; then
+    return 0
+  fi
+  return 1
+}
+
 # Extract the summary from output
 if [[ -s "$TEMP_OUTPUT" ]]; then
+  EXTRACTED=""
+
   # Try to extract just the text content (remove JSON wrapper if present)
   if jq -e '.result' "$TEMP_OUTPUT" > /dev/null 2>&1; then
-    jq -r '.result' "$TEMP_OUTPUT" > "$OUTPUT"
+    EXTRACTED=$(jq -r '.result' "$TEMP_OUTPUT")
   elif jq -e '.content' "$TEMP_OUTPUT" > /dev/null 2>&1; then
-    jq -r '.content' "$TEMP_OUTPUT" > "$OUTPUT"
+    EXTRACTED=$(jq -r '.content' "$TEMP_OUTPUT")
   else
     # Just use the output as-is
-    cat "$TEMP_OUTPUT" > "$OUTPUT"
+    EXTRACTED=$(cat "$TEMP_OUTPUT")
+  fi
+
+  # Validate extracted content
+  if [[ -z "$EXTRACTED" ]] || is_error_output "$EXTRACTED"; then
+    echo "WARNING: Summarization returned error/empty output, using truncated content" >&2
+    head -c 8000 <<< "$CONTENT" > "$OUTPUT"
+    echo "" >> "$OUTPUT"
+    echo "[... content truncated - summarization output invalid ...]" >> "$OUTPUT"
+  else
+    echo "$EXTRACTED" > "$OUTPUT"
   fi
 else
-  # Fallback if summarization failed
-  echo "WARNING: Summarization failed, using truncated content" >&2
+  # Fallback if summarization returned empty
+  echo "WARNING: Summarization returned empty output, using truncated content" >&2
   head -c 8000 <<< "$CONTENT" > "$OUTPUT"
   echo "" >> "$OUTPUT"
   echo "[... content truncated ...]" >> "$OUTPUT"

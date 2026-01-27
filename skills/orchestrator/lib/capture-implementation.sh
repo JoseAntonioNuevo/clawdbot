@@ -174,7 +174,7 @@ cd "$WORKTREE"
     done <<< "$CHANGED_FILES"
   fi
 
-  # Show deleted files content (what was removed)
+  # Show deleted files content (what was removed) - with redaction
   if [[ -n "$DELETED_FILES" ]]; then
     echo "## Deleted Files"
     echo ""
@@ -184,9 +184,24 @@ cd "$WORKTREE"
       if [[ -n "$file" ]]; then
         echo "### \`$file\` (DELETED)"
         echo ""
-        echo "\`\`\`diff"
-        git show "$BASE_BRANCH:$file" 2>/dev/null | head -50 || echo "(content not available)"
-        echo "\`\`\`"
+
+        # Check if deleted file was sensitive
+        if is_sensitive_file "$file"; then
+          echo "> **REDACTED**: This deleted file matches a sensitive pattern."
+          echo ""
+          echo "\`\`\`"
+          echo "(sensitive file - content redacted for security)"
+          echo "\`\`\`"
+        else
+          echo "\`\`\`diff"
+          DELETED_CONTENT=$(git show "$BASE_BRANCH:$file" 2>/dev/null | head -50 || echo "(content not available)")
+          if [[ "$REDACT" == "true" ]]; then
+            redact_secrets "$DELETED_CONTENT"
+          else
+            echo "$DELETED_CONTENT"
+          fi
+          echo "\`\`\`"
+        fi
         echo ""
       fi
     done <<< "$DELETED_FILES"

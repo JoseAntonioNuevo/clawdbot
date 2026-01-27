@@ -193,7 +193,26 @@ else
   PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
   if [[ $PROMPT_SIZE -gt 100000 ]]; then
     echo "ERROR: Prompt too large ($PROMPT_SIZE bytes) and codex doesn't support stdin/file input" >&2
-    rm -f "$PROMPT_FILE"
+    # Write error JSON so downstream steps can continue
+    cat > "$OUTPUT_FILE" << EOF
+{
+  "approved": false,
+  "summary": "Prompt too large ($PROMPT_SIZE bytes) - codex CLI doesn't support stdin or file input",
+  "issues": [
+    {
+      "severity": "critical",
+      "blocking": true,
+      "file": null,
+      "line": null,
+      "message": "Review context exceeded maximum size for codex CLI",
+      "suggestion": "Reduce context size or upgrade codex CLI to support stdin/file input"
+    }
+  ],
+  "missing": [],
+  "positives": []
+}
+EOF
+    rm -f "$PROMPT_FILE" "$TEMP_OUTPUT"
     exit 1
   fi
   timeout "$TIMEOUT" codex exec --model "$MODEL" "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || RESULT=$?
