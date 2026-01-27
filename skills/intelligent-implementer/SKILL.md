@@ -84,10 +84,13 @@ You have TWO options for calling Kimi K2. **Use Kimi CLI by default** (more stab
 
 ### Option A: Kimi CLI (RECOMMENDED - Default)
 ```bash
-kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [If there's previous Codex feedback, include it here]. Implement the task following best practices."
+kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [Codex feedback if any]. First read CLAUDE.md if it exists for project context, then implement following best practices."
 ```
 
-**IMPORTANT:** The `-p` flag must come AFTER `--work-dir` and the prompt must be a single line without leading newlines.
+**IMPORTANT:**
+- The `-p` flag must come AFTER `--work-dir`
+- Prompt must be a single line without leading newlines
+- Always instruct to read CLAUDE.md first for project-specific guidance
 
 **Why Kimi CLI is default:**
 - Native client from Moonshot AI
@@ -97,12 +100,7 @@ kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [If there's 
 
 ### Option B: OpenCode (Alternative)
 ```bash
-cd WORKTREE_PATH
-opencode run -m "kimi-k2" --format json "
-  TASK: [task description]
-  [If there's previous Codex feedback, include it here]
-  Implement the task following best practices.
-"
+cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task description]. [Codex feedback if any]. First read CLAUDE.md if it exists for project context, then implement following best practices."
 ```
 
 **When to use OpenCode:**
@@ -157,19 +155,14 @@ For each iteration:
 
 **1. Call Kimi K2 (use Kimi CLI by default):**
 ```bash
-kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [Previous Codex feedback if any]. Implement following best practices."
+kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [Previous Codex feedback if any]. Read CLAUDE.md first if exists, then implement following best practices."
 ```
 
 **Note:** Keep the prompt on a single line. No leading newlines or the CLI will fail.
 
 If Kimi CLI fails or hangs, fall back to OpenCode:
 ```bash
-cd WORKTREE_PATH
-opencode run -m "kimi-k2" "
-  TASK: [task description]
-  [feedback if any]
-  Implement the task.
-"
+cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task description]. [feedback if any]. Read CLAUDE.md first if exists, then implement."
 ```
 
 **2. Capture changes:**
@@ -204,18 +197,12 @@ codex exec "
 
 ### Step 3.5: Escalation to Claude Code (max 10 iterations)
 
-If Kimi is stuck, call Claude Code:
+If Kimi is stuck, call Claude Code **in the worktree directory** (so it reads the project's CLAUDE.md automatically):
 ```bash
-claude -p "
-  CONTEXT: Kimi K2 tried this task but is stuck.
-
-  ORIGINAL TASK: [task]
-
-  LATEST CODEX ISSUES: [issues]
-
-  Please resolve these problems.
-" --allowedTools "Bash,Read,Write,Edit"
+cd WORKTREE_PATH && claude -p "CONTEXT: Kimi K2 tried this task but is stuck. ORIGINAL TASK: [task]. LATEST CODEX ISSUES: [issues]. Read CLAUDE.md first if it exists, then resolve these problems." --allowedTools "Bash,Read,Write,Edit"
 ```
+
+**Important:** Claude Code automatically reads `CLAUDE.md` from the working directory. This file contains project-specific guidance, architecture decisions, and coding standards that Claude should follow.
 
 ### Step 4: Create PR (YOU generate all content)
 
