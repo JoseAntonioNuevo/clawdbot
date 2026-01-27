@@ -1,82 +1,108 @@
 #!/bin/bash
 # OpenCode Adapter for Clawdbot Orchestrator
-# Runs OpenCode (GLM 4.7) for code implementation
+# Runs OpenCode with Kimi K2.5 for code implementation
 set -euo pipefail
 
 [[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
 
 usage() {
   cat << EOF
-OpenCode Adapter for Clawdbot
+OpenCode Adapter for Clawdbot (Kimi K2.5 Implementer)
 
-Usage: $(basename "$0") <prompt> <output_file> [options]
-
-Arguments:
-  prompt        The task prompt for OpenCode
-  output_file   Where to save the JSON output
+Usage: $(basename "$0") [options]
 
 Options:
-  -m, --model MODEL       Model to use (default: zai/glm-4.7)
-  -w, --workdir PATH      Working directory (default: current)
-  --tools TOOLS           Comma-separated allowed tools
-  --timeout SECONDS       Timeout in seconds (default: 600)
-  -q, --quiet             Suppress progress output
+  --context FILE        Path to context file (replaces prompt)
+  --prompt TEXT         Direct prompt text
+  --workdir PATH        Working directory (default: current)
+  --output FILE         Where to save the output
+  -m, --model MODEL     Model to use (default: moonshot/kimi-k2.5-preview)
+  --tools TOOLS         Comma-separated allowed tools
+  --timeout SECONDS     Timeout in seconds (default: 900)
+  -q, --quiet           Suppress progress output
+  -h, --help            Show this help
+
+Environment:
+  MOONSHOT_API_KEY      API key for Moonshot/Kimi (required)
+  OPENCODE_MODEL        Override default model
 
 Examples:
-  $(basename "$0") "Fix the login bug" output.json -w /path/to/repo
-  $(basename "$0") "Add user auth" output.json --tools "Bash,Read,Write,Edit"
+  $(basename "$0") --context context.md --workdir /path/to/repo --output output.json
+  $(basename "$0") --prompt "Fix the login bug" --output output.json
 EOF
 }
 
-# Default values
-MODEL="${OPENCODE_MODEL:-zai/glm-4.7}"
+# Default values - Kimi K2.5 as implementer
+MODEL="${OPENCODE_MODEL:-moonshot/kimi-k2.5-preview}"
 WORKDIR="$(pwd)"
 TOOLS="Bash,Read,Write,Edit,Glob,Grep"
-TIMEOUT=600
+TIMEOUT=900
 QUIET=false
+CONTEXT_FILE=""
 PROMPT=""
 OUTPUT_FILE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --context) CONTEXT_FILE="$2"; shift 2 ;;
+    --prompt) PROMPT="$2"; shift 2 ;;
     -m|--model) MODEL="$2"; shift 2 ;;
     -w|--workdir) WORKDIR="$2"; shift 2 ;;
     --tools) TOOLS="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
+    --output) OUTPUT_FILE="$2"; shift 2 ;;
     -q|--quiet) QUIET=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
+      # Legacy positional args support
       if [[ -z "$PROMPT" ]]; then
         PROMPT="$1"
       elif [[ -z "$OUTPUT_FILE" ]]; then
         OUTPUT_FILE="$1"
       else
-        echo "Unknown argument: $1"; usage; exit 1
+        echo "Unknown argument: $1" >&2; usage >&2; exit 1
       fi
       shift
       ;;
   esac
 done
 
-[[ -z "$PROMPT" ]] && { echo "ERROR: prompt is required"; usage; exit 1; }
-[[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: output_file is required"; usage; exit 1; }
+# Get prompt from context file if provided
+if [[ -n "$CONTEXT_FILE" ]]; then
+  if [[ -f "$CONTEXT_FILE" ]]; then
+    PROMPT=$(cat "$CONTEXT_FILE")
+  else
+    echo "ERROR: Context file not found: $CONTEXT_FILE" >&2
+    exit 1
+  fi
+fi
+
+[[ -z "$PROMPT" ]] && { echo "ERROR: --context or --prompt required" >&2; usage >&2; exit 1; }
+[[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: --output required" >&2; usage >&2; exit 1; }
 
 # Check if OpenCode is installed
 if ! command -v opencode &>/dev/null; then
-  echo "ERROR: opencode is not installed"
-  echo "Install with: npm install -g opencode-ai"
+  echo "ERROR: opencode is not installed" >&2
+  echo "Install with: npm install -g opencode-ai" >&2
   exit 1
 fi
 
-# Check API key
-if [[ -z "${ZAI_API_KEY:-}" ]]; then
-  echo "ERROR: ZAI_API_KEY is not set"
-  exit 1
-fi
+# Note: OpenCode uses its own authentication (opencode auth login)
+# MOONSHOT_API_KEY may be used for direct API calls but opencode handles auth
 
 # Create output directory if needed
 mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Change to working directory
+cd "$WORKDIR"
+
+[[ "$QUIET" == "false" ]] && echo "Running OpenCode (Kimi K2.5) in $WORKDIR..."
+[[ "$QUIET" == "false" ]] && echo "Model: $MODEL"
+
+# Create temp file for prompt (to handle multiline properly)
+PROMPT_FILE=$(mktemp)
+echo "$PROMPT" > "$PROMPT_FILE"
 
 # Build the command
 CMD=(opencode run)
@@ -84,15 +110,6 @@ CMD+=(-m "$MODEL")
 CMD+=(--allowedTools "$TOOLS")
 CMD+=(-q)
 CMD+=(-f json)
-
-# Change to working directory
-cd "$WORKDIR"
-
-[[ "$QUIET" == "false" ]] && echo "Running OpenCode ($MODEL) in $WORKDIR..."
-
-# Create temp file for prompt (to handle multiline properly)
-PROMPT_FILE=$(mktemp)
-echo "$PROMPT" > "$PROMPT_FILE"
 
 # Run OpenCode with timeout
 RESULT=0
@@ -102,15 +119,20 @@ rm -f "$PROMPT_FILE"
 
 # Check result
 if [[ $RESULT -eq 124 ]]; then
-  echo "ERROR: OpenCode timed out after ${TIMEOUT}s"
-  echo '{"error": "timeout", "message": "OpenCode timed out"}' > "$OUTPUT_FILE"
+  echo "ERROR: OpenCode timed out after ${TIMEOUT}s" >&2
+  cat > "$OUTPUT_FILE" << EOF
+{
+  "error": "timeout",
+  "message": "OpenCode (Kimi K2.5) timed out after ${TIMEOUT}s",
+  "model": "$MODEL"
+}
+EOF
   exit 1
 elif [[ $RESULT -ne 0 ]]; then
-  echo "WARNING: OpenCode exited with code $RESULT"
+  echo "WARNING: OpenCode exited with code $RESULT" >&2
   # Don't exit - output might still be useful
 fi
 
 [[ "$QUIET" == "false" ]] && echo "Output saved to: $OUTPUT_FILE"
 
-# Return OpenCode's exit code
 exit $RESULT

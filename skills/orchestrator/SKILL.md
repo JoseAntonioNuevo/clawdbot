@@ -3,8 +3,8 @@ name: orchestrator
 description: |
   Intelligent Implementer Orchestrator - Use this skill when asked to implement
   coding tasks, fix bugs, add features, or make code changes to a project.
-  This skill orchestrates OpenCode (GLM 4.7), Codex review (GPT-5.2-Codex),
-  and Claude Code fallback (Opus 4.5) to complete tasks with code review.
+
+  Workflow: Claude Code (Plan) → OpenCode/Kimi (Implement) → Codex (Review) → Loop
 
   Triggers: "implement", "fix", "build", "create feature", "add", "code task",
   "run task on", "work on project", "orchestrate", "start task"
@@ -13,6 +13,7 @@ metadata:
     primaryEnv: ZAI_API_KEY
     requiredEnv:
       - ZAI_API_KEY
+      - MOONSHOT_API_KEY
     requiredCli:
       - opencode
       - codex
@@ -21,446 +22,505 @@ metadata:
 
 # Intelligent Implementer Orchestrator
 
-You are the master orchestrator for automated coding tasks. When a user gives you a task to implement on a project, follow this workflow precisely.
+You are the master orchestrator (powered by GLM 4.7) for automated coding tasks.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        CLAWDBOT (GLM 4.7)                               │
+│                        Master Orchestrator                               │
+│   Coordinates the workflow, maintains context, manages iterations        │
+└─────────────────────────────────────┬───────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           WORKFLOW LOOP                                  │
+│                                                                          │
+│  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐          │
+│  │  CLAUDE CODE │ ───▶ │   OPENCODE   │ ───▶ │  CODEX CLI   │          │
+│  │   Opus 4.5   │      │   Kimi K2.5  │      │ GPT-5.2-Codex│          │
+│  │              │      │              │      │              │          │
+│  │   PLANNER    │      │ IMPLEMENTER  │      │   REVIEWER   │          │
+│  │              │      │              │      │              │          │
+│  │ • Analyzes   │      │ • Executes   │      │ • Validates  │          │
+│  │   codebase   │      │   the plan   │      │   code       │          │
+│  │ • Creates    │      │ • Writes     │      │ • Finds      │          │
+│  │   strategy   │      │   code       │      │   issues     │          │
+│  │ • Revises    │      │ • Runs       │      │ • Approves   │          │
+│  │   on failure │      │   tests      │      │   or rejects │          │
+│  └──────────────┘      └──────────────┘      └──────┬───────┘          │
+│         ▲                                           │                   │
+│         │                                           ▼                   │
+│         │                                    ┌─────────────┐           │
+│         │                                    │  APPROVED?  │           │
+│         │                                    └──────┬──────┘           │
+│         │                                           │                   │
+│         │  ┌────────────────────────────────────────┤                   │
+│         │  │ NO: Full context passed back:          │ YES               │
+│         │  │ • Original task                        │                   │
+│         │  │ • All previous plans                   ▼                   │
+│         │  │ • What Kimi implemented          ┌──────────┐             │
+│         │  │ • Current codebase state         │ CREATE   │             │
+│         │  │ • Codex feedback & issues        │   PR     │             │
+│         │  │ • Test results                   └──────────┘             │
+│         │  │ • Iteration history                    │                   │
+│         └──┘                                        ▼                   │
+│                                               ┌──────────┐             │
+│                                               │ NOTIFY   │             │
+│                                               │ SUCCESS  │             │
+│                                               └──────────┘             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Context Management (CRITICAL)
+
+Every agent MUST receive full context. The orchestrator maintains a cumulative context file that grows with each iteration.
+
+### Context Structure
+
+```
+logs/<project>/<task-id>/
+├── state.json                    # Current state and metadata
+├── context/
+│   ├── original_task.md          # Original task description
+│   ├── codebase_summary.md       # Initial codebase analysis
+│   └── cumulative_context.md     # Growing context file (THE KEY FILE)
+├── iterations/
+│   ├── iter_001/
+│   │   ├── claude_plan.md        # Plan created by Claude
+│   │   ├── kimi_implementation.md # What Kimi did (diff + explanation)
+│   │   ├── codex_review.json     # Codex review results
+│   │   └── codex_feedback.md     # Human-readable feedback
+│   ├── iter_002/
+│   │   ├── claude_revised_plan.md
+│   │   ├── kimi_implementation.md
+│   │   ├── codex_review.json
+│   │   └── codex_feedback.md
+│   └── ...
+└── final/
+    ├── success_report.md         # Or failure_report.md
+    └── pr_description.md
+```
+
+### Cumulative Context Format
+
+The `cumulative_context.md` file is rebuilt after each iteration:
+
+```markdown
+# Task Context - Iteration N
+
+## Original Task
+<original task description>
+
+## Codebase Overview
+<summary of relevant files, architecture, patterns>
+
+## Iteration History
+
+### Iteration 1
+#### Plan (Claude Code)
+<plan details>
+
+#### Implementation (Kimi K2.5)
+<what was implemented, files changed, approach taken>
+
+#### Review (Codex)
+<review results, issues found, feedback>
+
+### Iteration 2
+#### Plan (Claude Code) - REVISION
+<revised plan addressing previous issues>
+<why the previous approach didn't work>
+<new strategy>
+
+#### Implementation (Kimi K2.5)
+...
+
+#### Review (Codex)
+...
+
+## Current State
+- Files modified: <list>
+- Tests status: <pass/fail details>
+- Outstanding issues: <from latest Codex review>
+
+## What Needs to Happen Next
+<clear direction for the next agent>
+```
+
+---
 
 ## Prerequisites
 
-Before starting, ensure:
-1. Environment file exists: `~/.clawdbot-orchestrator.env` with ZAI_API_KEY
-2. CLI tools are installed and authenticated:
-   - `opencode` (run: `opencode auth login`)
-   - `codex` (run: `codex auth login`)
-   - `claude` (authenticates on first run)
-   - `gh` (run: `gh auth login`)
-   - `git`
+1. Environment file: `~/.clawdbot-orchestrator.env`
+   - `ZAI_API_KEY` - For Clawdbot orchestrator (GLM 4.7)
+   - `MOONSHOT_API_KEY` - For OpenCode/Kimi K2.5
 
-Load environment:
+2. CLI tools authenticated:
+   - `opencode` → `opencode auth login` (uses Moonshot/Kimi)
+   - `codex` → `codex auth login`
+   - `claude` → authenticates on first run
+   - `gh` → `gh auth login`
+
+---
+
+## Workflow Steps
+
+### Step 1: Task Intake & Setup
+
 ```bash
 source ~/.clawdbot-orchestrator.env
-```
 
-## Workflow Overview
-
-```
-USER REQUEST → Parse Task → Create Worktree → OpenCode Loop (max 80)
-                                                    ↓
-                                              Codex Review
-                                                    ↓
-                                         Approved? → Create PR → Notify Success
-                                                    ↓ No
-                                              Stuck? → Claude Loop (max 10)
-                                                    ↓
-                                         Approved? → Create PR → Notify Success
-                                                    ↓ No (10 iterations)
-                                              Notify Failure
-```
-
----
-
-## Step 1: Task Intake & Validation
-
-### 1.1 Parse the Request
-
-Extract from user's natural language request:
-- **Project path**: Absolute path to the git repository
-- **Task description**: What needs to be implemented/fixed
-- **Base branch**: (optional, default from config or 'main')
-
-### 1.2 Validate the Project
-
-```bash
-PROJECT_PATH="<extracted_project_path>"
-
-# Navigate to project
-cd "$PROJECT_PATH" || {
-  echo "ERROR: Project path does not exist: $PROJECT_PATH"
-  exit 1
-}
-
-# Verify it's a git repo
-if ! git rev-parse --git-dir > /dev/null 2>&1; then
-  echo "ERROR: Not a git repository: $PROJECT_PATH"
-  exit 1
-fi
-
-# Check for uncommitted changes
-if [[ -n $(git status --porcelain) ]]; then
-  echo "WARNING: Uncommitted changes detected in $PROJECT_PATH"
-  # Options:
-  # 1. Ask user to stash/commit
-  # 2. Continue anyway (changes stay in main repo, not in worktree)
-  # 3. Abort
-fi
-
-# Get default branch if not specified
-BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}"
-BASE_BRANCH="${BASE_BRANCH:-main}"
-```
-
-### 1.3 Generate Identifiers
-
-```bash
-# Generate task ID: YYYYMMDD-HHMMSS-<8-char-hash>
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-TASK_HASH=$(echo "$TASK_DESCRIPTION" | md5sum | cut -c1-8)
-TASK_ID="${TIMESTAMP}-${TASK_HASH}"
-
-# Generate branch name based on task (YOU decide this intelligently)
-# Examples:
-#   "fix login timeout bug" → ai/fix-login-timeout
-#   "add user authentication" → ai/add-user-auth
-#   "refactor database layer" → ai/refactor-db-layer
-BRANCH_NAME="ai/<your-chosen-descriptive-name>"
-```
-
----
-
-## Step 2: Create Isolated Workspace
-
-```bash
-# Set paths
-PROJECT_NAME=$(basename "$PROJECT_PATH")
-WORKTREE_BASE="${WORKTREE_BASE:-$HOME/ai-worktrees}"
-WORKTREE_PATH="$WORKTREE_BASE/$PROJECT_NAME/$TASK_ID"
-CLAWDBOT_ROOT="/Users/jose/Documents/clawdbot"
-LOG_DIR="$CLAWDBOT_ROOT/logs/$PROJECT_NAME/$TASK_ID"
-
-# Create directories
-mkdir -p "$(dirname "$WORKTREE_PATH")"
-mkdir -p "$LOG_DIR"/{opencode,codex,claude}
-
-# Create worktree with new branch
+# Validate project
 cd "$PROJECT_PATH"
-git fetch origin "$BASE_BRANCH" 2>/dev/null || true
-git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/$BASE_BRANCH" 2>/dev/null || \
+git rev-parse --git-dir > /dev/null 2>&1 || exit 1
+
+# Generate identifiers
+TASK_ID="$(date +%Y%m%d-%H%M%S)-$(echo "$TASK" | md5sum | cut -c1-8)"
+BRANCH_NAME="ai/<descriptive-name>"  # YOU decide based on task
+
+# Create worktree
+WORKTREE_PATH="$WORKTREE_BASE/$PROJECT_NAME/$TASK_ID"
 git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" "$BASE_BRANCH"
 
-# Initialize state file
+# Initialize context structure
+LOG_DIR="$CLAWDBOT_ROOT/logs/$PROJECT_NAME/$TASK_ID"
+mkdir -p "$LOG_DIR"/{context,iterations,final}
+
+# Save original task
+echo "$TASK_DESCRIPTION" > "$LOG_DIR/context/original_task.md"
+
+# Build initial codebase summary
+./lib/analyze-codebase.sh "$WORKTREE_PATH" > "$LOG_DIR/context/codebase_summary.md"
+
+# Initialize state
 cat > "$LOG_DIR/state.json" << EOF
 {
   "task_id": "$TASK_ID",
   "project": "$PROJECT_PATH",
-  "project_name": "$PROJECT_NAME",
   "task": "$TASK_DESCRIPTION",
   "branch": "$BRANCH_NAME",
-  "base_branch": "$BASE_BRANCH",
   "worktree": "$WORKTREE_PATH",
-  "log_dir": "$LOG_DIR",
   "status": "in_progress",
-  "implementer": "opencode",
-  "opencode_iterations": 0,
-  "claude_iterations": 0,
-  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "completed_at": null,
-  "pr_url": null,
-  "error": null
+  "current_iteration": 0,
+  "max_iterations": 10,
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
-
-echo "Created worktree: $WORKTREE_PATH"
-echo "Branch: $BRANCH_NAME"
-echo "Logs: $LOG_DIR"
 ```
 
----
-
-## Step 3: OpenCode Implementation Loop
-
-Run up to 80 iterations of OpenCode + Codex review.
+### Step 2: Main Loop
 
 ```bash
-MAX_OPENCODE=${MAX_OPENCODE_ITERATIONS:-80}
+MAX_ITERATIONS=10
 
-for ITERATION in $(seq 1 $MAX_OPENCODE); do
-  echo "=== OpenCode Iteration $ITERATION/$MAX_OPENCODE ==="
+for ITERATION in $(seq 1 $MAX_ITERATIONS); do
+  echo "═══════════════════════════════════════════════════════════"
+  echo "  ITERATION $ITERATION / $MAX_ITERATIONS"
+  echo "═══════════════════════════════════════════════════════════"
 
-  # Build prompt for OpenCode
-  PROMPT="TASK: $TASK_DESCRIPTION
+  ITER_DIR="$LOG_DIR/iterations/iter_$(printf '%03d' $ITERATION)"
+  mkdir -p "$ITER_DIR"
 
-WORKING DIRECTORY: $WORKTREE_PATH
+  # ─────────────────────────────────────────────────────────────
+  # PHASE 1: CLAUDE CODE - CREATE/REVISE PLAN
+  # ─────────────────────────────────────────────────────────────
 
-IMPORTANT: Make changes to implement the task. After making changes, ensure the code compiles/runs correctly."
+  echo "▶ Phase 1: Claude Code (Opus 4.5) - Planning..."
 
-  # Add previous Codex feedback if iteration > 1
-  if [[ $ITERATION -gt 1 && -f "$LOG_DIR/codex_feedback.md" ]]; then
-    PROMPT="$PROMPT
+  # Build full context for Claude
+  ./lib/build-claude-context.sh \
+    --task "$LOG_DIR/context/original_task.md" \
+    --codebase "$LOG_DIR/context/codebase_summary.md" \
+    --history "$LOG_DIR/iterations" \
+    --worktree "$WORKTREE_PATH" \
+    --iteration "$ITERATION" \
+    --output "$ITER_DIR/claude_input_context.md"
 
-PREVIOUS REVIEW FEEDBACK (must address):
-$(cat "$LOG_DIR/codex_feedback.md")
+  # Run Claude Code for planning
+  ./lib/claude-code.sh \
+    --mode plan \
+    --context "$ITER_DIR/claude_input_context.md" \
+    --workdir "$WORKTREE_PATH" \
+    --output "$ITER_DIR/claude_plan.md"
 
-Please address ALL the issues listed above."
-  fi
+  # ─────────────────────────────────────────────────────────────
+  # PHASE 2: OPENCODE/KIMI - IMPLEMENT THE PLAN
+  # ─────────────────────────────────────────────────────────────
 
-  # Run OpenCode
-  cd "$WORKTREE_PATH"
-  ./lib/opencode.sh "$PROMPT" "$LOG_DIR/opencode/iter_${ITERATION}.json"
+  echo "▶ Phase 2: OpenCode (Kimi K2.5) - Implementing..."
 
-  # Capture diff
-  git diff "$BASE_BRANCH"...HEAD > "$LOG_DIR/opencode/diff_${ITERATION}.txt" 2>/dev/null || true
-  git diff --stat "$BASE_BRANCH"...HEAD > "$LOG_DIR/opencode/diff_stat_${ITERATION}.txt" 2>/dev/null || true
+  # Build context for Kimi (includes the plan)
+  ./lib/build-kimi-context.sh \
+    --plan "$ITER_DIR/claude_plan.md" \
+    --task "$LOG_DIR/context/original_task.md" \
+    --codebase "$LOG_DIR/context/codebase_summary.md" \
+    --history "$LOG_DIR/iterations" \
+    --iteration "$ITERATION" \
+    --output "$ITER_DIR/kimi_input_context.md"
 
-  # Run tests (if enabled)
-  if [[ "${AUTO_RUN_TESTS:-true}" == "true" ]]; then
-    ./lib/detect-tests.sh "$WORKTREE_PATH" > "$LOG_DIR/opencode/tests_${ITERATION}.txt" 2>&1 || true
-  fi
+  # Run OpenCode with Kimi K2.5
+  ./lib/opencode.sh \
+    --context "$ITER_DIR/kimi_input_context.md" \
+    --workdir "$WORKTREE_PATH" \
+    --output "$ITER_DIR/kimi_output.json"
 
-  # Run Codex review
-  ./lib/codex.sh "$WORKTREE_PATH" "$BASE_BRANCH" "$LOG_DIR/codex/review_${ITERATION}.json"
+  # Capture what Kimi did
+  ./lib/capture-implementation.sh \
+    --worktree "$WORKTREE_PATH" \
+    --base "$BASE_BRANCH" \
+    --output "$ITER_DIR/kimi_implementation.md"
 
-  # Check if approved
-  APPROVAL=$(./lib/codex-approval.sh "$LOG_DIR/codex/review_${ITERATION}.json")
+  # Run tests
+  ./lib/detect-tests.sh "$WORKTREE_PATH" > "$ITER_DIR/test_results.txt" 2>&1 || true
 
-  if [[ "$APPROVAL" == "approved" ]]; then
-    echo "✓ Codex approved at iteration $ITERATION"
-    # Update state
-    jq ".opencode_iterations = $ITERATION | .status = \"approved\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-    # Go to Step 5: Create PR
-    break
-  fi
+  # ─────────────────────────────────────────────────────────────
+  # PHASE 3: CODEX - REVIEW THE IMPLEMENTATION
+  # ─────────────────────────────────────────────────────────────
 
-  # Extract feedback for next iteration
-  ./lib/extract-feedback.sh "$LOG_DIR/codex/review_${ITERATION}.json" > "$LOG_DIR/codex_feedback.md"
+  echo "▶ Phase 3: Codex (GPT-5.2-Codex) - Reviewing..."
 
-  # Check if stuck
-  STUCK_RESULT=$(./lib/stuck-detector.sh "$LOG_DIR")
-
-  if [[ "$STUCK_RESULT" == "STUCK"* ]]; then
-    echo "⚠ Detected stuck state after $ITERATION iterations"
-    echo "$STUCK_RESULT" > "$LOG_DIR/stuck_reason.md"
-    # Update state and go to Step 4: Escalate to Claude
-    jq ".opencode_iterations = $ITERATION | .status = \"stuck\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-    break
-  fi
-
-  # Update iteration count in state
-  jq ".opencode_iterations = $ITERATION" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-done
-
-# If reached max iterations without approval
-if [[ $ITERATION -eq $MAX_OPENCODE && "$APPROVAL" != "approved" ]]; then
-  echo "⚠ Reached maximum OpenCode iterations ($MAX_OPENCODE)"
-  jq ".status = \"max_iterations\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-fi
-```
-
----
-
-## Step 4: Escalate to Claude Code
-
-When OpenCode is stuck or reaches max iterations, escalate to Claude Code.
-
-```bash
-# Build comprehensive context
-./lib/context-builder.sh \
-  --project "$PROJECT_PATH" \
-  --worktree "$WORKTREE_PATH" \
-  --task "$TASK_DESCRIPTION" \
-  --log-dir "$LOG_DIR" \
-  --output "$LOG_DIR/full_context.md"
-
-MAX_CLAUDE=${MAX_CLAUDE_ITERATIONS:-10}
-
-for CLAUDE_ITER in $(seq 1 $MAX_CLAUDE); do
-  echo "=== Claude Code Iteration $CLAUDE_ITER/$MAX_CLAUDE ==="
-
-  CONTEXT=$(cat "$LOG_DIR/full_context.md")
-
-  # Add current feedback
-  if [[ -f "$LOG_DIR/codex_feedback.md" ]]; then
-    CONTEXT="$CONTEXT
-
-CURRENT BLOCKING ISSUES:
-$(cat "$LOG_DIR/codex_feedback.md")"
-  fi
-
-  # Run Claude Code
-  cd "$WORKTREE_PATH"
-  ./lib/claude-code.sh "$CONTEXT" "$LOG_DIR/claude/iter_${CLAUDE_ITER}.json"
+  # Build context for Codex
+  ./lib/build-codex-context.sh \
+    --task "$LOG_DIR/context/original_task.md" \
+    --plan "$ITER_DIR/claude_plan.md" \
+    --implementation "$ITER_DIR/kimi_implementation.md" \
+    --tests "$ITER_DIR/test_results.txt" \
+    --worktree "$WORKTREE_PATH" \
+    --base "$BASE_BRANCH" \
+    --output "$ITER_DIR/codex_input_context.md"
 
   # Run Codex review
-  ./lib/codex.sh "$WORKTREE_PATH" "$BASE_BRANCH" "$LOG_DIR/codex/claude_review_${CLAUDE_ITER}.json"
+  ./lib/codex.sh \
+    --context "$ITER_DIR/codex_input_context.md" \
+    --workdir "$WORKTREE_PATH" \
+    --base "$BASE_BRANCH" \
+    --output "$ITER_DIR/codex_review.json"
 
-  # Check if approved
-  APPROVAL=$(./lib/codex-approval.sh "$LOG_DIR/codex/claude_review_${CLAUDE_ITER}.json")
+  # Extract human-readable feedback
+  ./lib/extract-feedback.sh "$ITER_DIR/codex_review.json" > "$ITER_DIR/codex_feedback.md"
+
+  # ─────────────────────────────────────────────────────────────
+  # PHASE 4: CHECK APPROVAL
+  # ─────────────────────────────────────────────────────────────
+
+  APPROVAL=$(./lib/codex-approval.sh "$ITER_DIR/codex_review.json")
 
   if [[ "$APPROVAL" == "approved" ]]; then
-    echo "✓ Codex approved Claude's changes at iteration $CLAUDE_ITER"
-    jq ".claude_iterations = $CLAUDE_ITER | .status = \"approved\" | .implementer = \"claude\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
+    echo "✅ APPROVED at iteration $ITERATION"
+
+    # Update cumulative context with success
+    ./lib/update-cumulative-context.sh \
+      --log-dir "$LOG_DIR" \
+      --iteration "$ITERATION" \
+      --status "approved"
+
+    # Go to PR creation
     break
   fi
 
-  # Extract feedback
-  ./lib/extract-feedback.sh "$LOG_DIR/codex/claude_review_${CLAUDE_ITER}.json" > "$LOG_DIR/codex_feedback.md"
+  echo "❌ Not approved. Preparing context for next iteration..."
+
+  # Update cumulative context with failure details
+  ./lib/update-cumulative-context.sh \
+    --log-dir "$LOG_DIR" \
+    --iteration "$ITERATION" \
+    --status "rejected" \
+    --feedback "$ITER_DIR/codex_feedback.md"
 
   # Update state
-  jq ".claude_iterations = $CLAUDE_ITER" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-done
+  jq ".current_iteration = $ITERATION" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" \
+    && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
 
-# If Claude also failed
-if [[ $CLAUDE_ITER -eq $MAX_CLAUDE && "$APPROVAL" != "approved" ]]; then
-  echo "✗ Claude Code also failed after $MAX_CLAUDE iterations"
-  jq ".status = \"failed\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-  # Go to Step 6: Failure notification
+done
+```
+
+### Step 3: Create PR (on success)
+
+```bash
+if [[ "$APPROVAL" == "approved" ]]; then
+  cd "$WORKTREE_PATH"
+
+  # Stage and commit
+  git add -A
+  git commit -m "$(cat <<EOF
+$TASK_DESCRIPTION
+
+Implemented via Clawdbot Intelligent Implementer
+- Planner: Claude Code (Opus 4.5)
+- Implementer: OpenCode (Kimi K2.5)
+- Reviewer: Codex (GPT-5.2-Codex)
+- Iterations: $ITERATION
+
+Co-Authored-By: Clawdbot <noreply@clawd.bot>
+EOF
+)"
+
+  # Push and create PR
+  git push -u origin "$BRANCH_NAME"
+
+  # Generate PR description from context
+  ./lib/generate-pr-description.sh \
+    --log-dir "$LOG_DIR" \
+    --output "$LOG_DIR/final/pr_description.md"
+
+  PR_URL=$(gh pr create \
+    --title "<Generated title based on task>" \
+    --body "$(cat "$LOG_DIR/final/pr_description.md")" \
+    --base "$BASE_BRANCH")
+
+  # Update state and notify
+  jq ".status = \"completed\" | .pr_url = \"$PR_URL\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" \
+    && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
+
+  ./lib/notify.sh success "$TASK_DESCRIPTION" "$PR_URL" "$LOG_DIR/state.json"
+
+else
+  # Max iterations reached without approval
+  ./lib/generate-failure-report.sh --log-dir "$LOG_DIR" --output "$LOG_DIR/final/failure_report.md"
+  ./lib/notify.sh failure "$TASK_DESCRIPTION" "$LOG_DIR/final/failure_report.md" "$LOG_DIR/state.json"
 fi
 ```
 
 ---
 
-## Step 5: Success - Create PR
+## Context Building Scripts
 
-```bash
-cd "$WORKTREE_PATH"
+### build-claude-context.sh
 
-# Stage and commit all changes
-git add -A
+Builds the full context for Claude Code to create or revise a plan:
 
-# Generate commit message based on task and changes
-COMMIT_MSG="$TASK_DESCRIPTION
+```markdown
+# Context for Claude Code - Iteration {N}
 
-Implemented by Clawdbot Intelligent Implementer
-- Primary: OpenCode (GLM 4.7)
-- Reviewer: Codex (GPT-5.2-Codex)
-$(if [[ "$(jq -r '.implementer' "$LOG_DIR/state.json")" == "claude" ]]; then echo "- Fallback: Claude Code (Opus 4.5)"; fi)
+## Your Role
+You are the PLANNER. Analyze the codebase and create a detailed implementation plan.
+{If iteration > 1: You are REVISING the plan based on what didn't work.}
 
-Co-Authored-By: Clawdbot <noreply@clawd.bot>"
+## Original Task
+{content of original_task.md}
 
-git commit -m "$COMMIT_MSG"
+## Codebase Overview
+{content of codebase_summary.md}
 
-# Push branch
-git push -u origin "$BRANCH_NAME"
+## Current State of the Code
+{git diff showing current changes}
+{list of modified files}
 
-# Generate PR title and body
-PR_TITLE="<Generated based on task - imperative, under 70 chars>"
-# Examples: "Fix login timeout issue", "Add JWT authentication", "Refactor database queries"
+{If iteration > 1:}
+## Previous Iterations
 
-# Create PR
-PR_URL=$(gh pr create \
-  --title "$PR_TITLE" \
-  --body "$(cat <<'PRBODY'
-## Summary
-<!-- 1-3 bullet points of key changes -->
+### Iteration 1
+**Plan you created:**
+{previous plan}
 
-## Task
-> $TASK_DESCRIPTION
+**What Kimi implemented:**
+{implementation details}
 
-## Implementation Details
-- **Implementer**: $(jq -r '.implementer' "$LOG_DIR/state.json" | sed 's/opencode/OpenCode (GLM 4.7)/; s/claude/Claude Code (Opus 4.5)/')
-- **Iterations**: $(jq -r '.opencode_iterations' "$LOG_DIR/state.json") (OpenCode) + $(jq -r '.claude_iterations' "$LOG_DIR/state.json") (Claude)
-- **Reviewer**: Codex (GPT-5.2-Codex)
+**Why Codex rejected it:**
+{feedback and issues}
+
+### Iteration 2
+...
+
+## What You Need To Do Now
+1. Analyze what went wrong in previous attempts
+2. Consider the Codex feedback carefully
+3. Create a REVISED plan that addresses all issues
+4. Be specific about what needs to change
+
+## Output Format
+Provide a detailed plan with:
+- Step-by-step implementation instructions
+- Files to create/modify
+- Code snippets or pseudocode
+- Expected test cases
+- Potential pitfalls to avoid
+```
+
+### build-kimi-context.sh
+
+Builds the context for OpenCode/Kimi to implement the plan:
+
+```markdown
+# Context for Kimi K2.5 - Implementation
+
+## Your Role
+You are the IMPLEMENTER. Execute the plan created by Claude Code.
+
+## The Plan to Implement
+{content of claude_plan.md}
+
+## Original Task
+{content of original_task.md}
+
+## Codebase Overview
+{content of codebase_summary.md}
+
+{If iteration > 1:}
+## Previous Attempts
+You tried before and it didn't pass review. Here's what happened:
+
+### What you did:
+{previous implementation}
+
+### Why it was rejected:
+{Codex feedback}
+
+### The new plan addresses this by:
+{relevant parts of new plan}
+
+## Instructions
+1. Follow the plan step by step
+2. Write clean, working code
+3. Run tests after implementation
+4. Make sure all plan items are addressed
+```
+
+### build-codex-context.sh
+
+Builds the context for Codex to review:
+
+```markdown
+# Code Review Request
+
+## Original Task
+{content of original_task.md}
+
+## Implementation Plan
+{content of claude_plan.md}
+
+## What Was Implemented
+{content of kimi_implementation.md}
+
+## Code Changes
+{git diff}
 
 ## Test Results
-<!-- Auto-detected test output -->
+{content of test_results.txt}
 
-## Codex Review
-Status: ✅ Approved
+## Review Criteria
+1. Does the implementation match the plan?
+2. Does it fulfill the original task?
+3. Is the code correct and complete?
+4. Do all tests pass?
+5. Are there any bugs or issues?
+6. Is the code clean and maintainable?
 
----
-🦞 Generated by [Clawdbot Intelligent Implementer](https://github.com/clawdbot/clawdbot)
-PRBODY
-)" \
-  --base "$BASE_BRANCH" \
-  --head "$BRANCH_NAME" \
-  2>/dev/null)
-
-# Update state with PR URL
-jq ".pr_url = \"$PR_URL\" | .status = \"completed\" | .completed_at = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-
-echo "✓ PR created: $PR_URL"
-
-# Send success notification
-./lib/notify.sh success "$TASK_DESCRIPTION" "$PR_URL" "$LOG_DIR/state.json"
+## Your Response
+Provide structured JSON with:
+- approved: boolean
+- issues: array of {severity, file, line, message, suggestion}
+- summary: overall assessment
 ```
 
 ---
 
-## Step 6: Failure - Notify User
+## Key Principles
 
-```bash
-# Generate failure report
-cat > "$LOG_DIR/failure_report.md" << EOF
-# Task Failed: $TASK_DESCRIPTION
-
-## Summary
-- OpenCode iterations: $(jq -r '.opencode_iterations' "$LOG_DIR/state.json")
-- Claude Code iterations: $(jq -r '.claude_iterations' "$LOG_DIR/state.json")
-- Final status: $(jq -r '.status' "$LOG_DIR/state.json")
-
-## Last Blocking Issues
-$(cat "$LOG_DIR/codex_feedback.md" 2>/dev/null || echo "No feedback available")
-
-## Stuck Reason
-$(cat "$LOG_DIR/stuck_reason.md" 2>/dev/null || echo "Max iterations reached")
-
-## Files Modified
-$(cd "$WORKTREE_PATH" && git diff --stat "$BASE_BRANCH"...HEAD 2>/dev/null || echo "No changes")
-
-## Suggested Next Steps
-1. Review the code at: $WORKTREE_PATH
-2. Check logs at: $LOG_DIR
-3. Manually address the blocking issues
-4. Re-run the task or complete manually
-
-## Resources
-- Worktree: $WORKTREE_PATH
-- Branch: $BRANCH_NAME
-- Logs: $LOG_DIR
-EOF
-
-# Update state
-jq ".status = \"failed\" | .completed_at = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" "$LOG_DIR/state.json" > "$LOG_DIR/state.tmp" && mv "$LOG_DIR/state.tmp" "$LOG_DIR/state.json"
-
-# Send failure notification
-./lib/notify.sh failure "$TASK_DESCRIPTION" "$LOG_DIR/failure_report.md" "$LOG_DIR/state.json"
-
-echo "✗ Task failed. Report: $LOG_DIR/failure_report.md"
-```
-
----
-
-## Helper Scripts Reference
-
-| Script | Purpose |
-|--------|---------|
-| `lib/worktree.sh` | Git worktree management |
-| `lib/opencode.sh` | Run OpenCode with proper arguments |
-| `lib/codex.sh` | Run Codex review |
-| `lib/claude-code.sh` | Run Claude Code |
-| `lib/stuck-detector.sh` | Detect if implementation is stuck |
-| `lib/context-builder.sh` | Build context for Claude escalation |
-| `lib/detect-tests.sh` | Auto-detect and run tests |
-| `lib/codex-approval.sh` | Parse Codex approval status |
-| `lib/extract-feedback.sh` | Extract feedback from Codex review |
-| `lib/notify.sh` | Send notifications |
-
----
-
-## State Machine
-
-```
-┌─────────┐
-│ pending │
-└────┬────┘
-     │ start
-     ▼
-┌──────────────┐
-│ in_progress  │
-└──────┬───────┘
-       │
-       ├── opencode loop ──┬── approved ───┐
-       │                   │               │
-       │                   └── stuck ──────┤
-       │                                   │
-       │                                   ▼
-       │                         ┌─────────────────┐
-       │                         │ claude_fallback │
-       │                         └────────┬────────┘
-       │                                  │
-       │               ┌── approved ──────┤
-       │               │                  │
-       │               │      ┌── failed ─┘
-       │               │      │
-       ▼               ▼      ▼
-┌───────────┐    ┌──────────┐
-│ completed │    │  failed  │
-└───────────┘    └──────────┘
-```
+1. **Context is King**: Every agent gets the FULL picture - task, history, code, feedback
+2. **Nothing is Lost**: Every iteration is logged and available for analysis
+3. **Clear Handoffs**: Each agent knows exactly what it needs to do
+4. **Cumulative Learning**: Later iterations build on earlier ones
+5. **Fail Forward**: Each failure provides information for the next attempt
