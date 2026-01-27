@@ -199,12 +199,21 @@ EOF
 TEMP_OUTPUT=$(mktemp)
 
 if command -v opencode &>/dev/null; then
-  timeout 60 opencode run \
-    -m "$MODEL" \
-    --allowedTools "" \
-    -q \
-    "$(cat "$PROMPT_FILE")" \
-    > "$TEMP_OUTPUT" 2>&1 || true
+  # Use stdin to avoid ARG_MAX limits with large contexts
+  PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+  RUN_SUCCESS=false
+
+  # Try stdin first (preferred for large prompts)
+  if timeout 60 opencode run -m "$MODEL" --allowedTools "" -q - < "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  # Try --prompt-file if available
+  elif timeout 60 opencode run -m "$MODEL" --allowedTools "" -q --prompt-file "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  # Last resort: direct argument (check size first)
+  elif [[ $PROMPT_SIZE -lt 100000 ]]; then
+    timeout 60 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || true
+    RUN_SUCCESS=true
+  fi
 else
   echo "ERROR: opencode not available for normalization" >&2
   rm -f "$PROMPT_FILE"

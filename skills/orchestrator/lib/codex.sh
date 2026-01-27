@@ -89,11 +89,23 @@ cd "$WORKDIR"
 # Build the full review prompt
 REVIEW_PROMPT=""
 
-if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
+if [[ -n "$CONTEXT_FILE" ]]; then
+  # Context file was explicitly provided - it MUST exist
+  if [[ ! -f "$CONTEXT_FILE" ]]; then
+    echo "ERROR: Context file specified but not found: $CONTEXT_FILE" >&2
+    echo "Full context is required for orchestrator runs." >&2
+    exit 1
+  fi
+  if [[ ! -r "$CONTEXT_FILE" ]]; then
+    echo "ERROR: Context file not readable: $CONTEXT_FILE" >&2
+    exit 1
+  fi
   [[ "$QUIET" == "false" ]] && echo "Using context from: $CONTEXT_FILE"
   REVIEW_PROMPT=$(cat "$CONTEXT_FILE")
 else
-  [[ "$QUIET" == "false" ]] && echo "No context file provided, building basic review context..."
+  # No context file - only allowed for standalone/manual runs
+  [[ "$QUIET" == "false" ]] && echo "WARNING: No context file provided, building basic review context..."
+  [[ "$QUIET" == "false" ]] && echo "For orchestrator runs, use --context to provide full context."
 
   # Build basic context from git diff
   DIFF_STAT=$(git diff --stat "$BASE_BRANCH"...HEAD 2>/dev/null || echo "Unable to get diff stats")
@@ -160,20 +172,32 @@ RULES:
 
 Respond with ONLY the JSON, no other text."
 
-# Create temp file for the prompt
+# Create temp file for the prompt (avoids ARG_MAX limits)
 PROMPT_FILE=$(mktemp)
 echo "$FULL_PROMPT" > "$PROMPT_FILE"
 
 # Run Codex with the full context
+# Use stdin to avoid ARG_MAX limits with large contexts
 RESULT=0
 TEMP_OUTPUT=$(mktemp)
 
 [[ "$QUIET" == "false" ]] && echo "Sending review request to Codex..."
 
-timeout "$TIMEOUT" codex exec \
-  --model "$MODEL" \
-  "$(cat "$PROMPT_FILE")" \
-  > "$TEMP_OUTPUT" 2>&1 || RESULT=$?
+# Try stdin first (preferred for large prompts), fall back to file arg
+if timeout "$TIMEOUT" codex exec --model "$MODEL" - < "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RESULT=0
+elif timeout "$TIMEOUT" codex exec --model "$MODEL" --prompt-file "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RESULT=0
+else
+  # Last resort: direct argument (may fail for very large contexts)
+  PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+  if [[ $PROMPT_SIZE -gt 100000 ]]; then
+    echo "ERROR: Prompt too large ($PROMPT_SIZE bytes) and codex doesn't support stdin/file input" >&2
+    rm -f "$PROMPT_FILE"
+    exit 1
+  fi
+  timeout "$TIMEOUT" codex exec --model "$MODEL" "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || RESULT=$?
+fi
 
 rm -f "$PROMPT_FILE"
 

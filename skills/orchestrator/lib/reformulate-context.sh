@@ -326,14 +326,28 @@ EOF
 fi
 
 # Run GLM 4.7 with interleaved thinking for better quality
-timeout 120 opencode run \
-  -m "$MODEL" \
-  --allowedTools "" \
-  -q \
-  "$(cat "$PROMPT_FILE")" \
-  > "$TEMP_OUTPUT" 2>&1 || {
-    echo "WARNING: GLM 4.7 reformulation failed, using fallback" >&2
-    cat > "$OUTPUT" << EOF
+# Use stdin to avoid ARG_MAX limits with large contexts
+PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+[[ "$QUIET" == "false" ]] && echo "Prompt size: $PROMPT_SIZE bytes"
+
+RUN_SUCCESS=false
+
+# Try stdin first (preferred for large prompts)
+if timeout 120 opencode run -m "$MODEL" --allowedTools "" -q - < "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RUN_SUCCESS=true
+# Try --prompt-file if available
+elif timeout 120 opencode run -m "$MODEL" --allowedTools "" -q --prompt-file "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RUN_SUCCESS=true
+# Last resort: direct argument (check size first)
+elif [[ $PROMPT_SIZE -lt 100000 ]]; then
+  if timeout 120 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  fi
+fi
+
+if [[ "$RUN_SUCCESS" != "true" ]]; then
+  echo "WARNING: GLM 4.7 reformulation failed, using fallback" >&2
+  cat > "$OUTPUT" << EOF
 # Revised Implementation Request - Iteration $((ITERATION + 1))
 
 ## Task
@@ -345,9 +359,9 @@ $FEEDBACK_CONTENT
 ## Required Changes
 Address all issues identified by Codex above.
 EOF
-    rm -f "$PROMPT_FILE" "$TEMP_OUTPUT"
-    exit 0
-  }
+  rm -f "$PROMPT_FILE" "$TEMP_OUTPUT"
+  exit 0
+fi
 
 rm -f "$PROMPT_FILE"
 

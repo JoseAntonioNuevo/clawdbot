@@ -3,6 +3,8 @@
 # Records what was implemented for context in reviews and future iterations
 set -euo pipefail
 
+[[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
+
 usage() {
   cat << EOF
 Capture Implementation Details
@@ -14,20 +16,71 @@ Required:
   --base BRANCH         Base branch for diff
   --output FILE         Where to write the summary
 
+Optional:
+  --redact              Redact potential secrets from output (default: true)
+  --no-redact           Disable redaction
+  --exclude PATTERN     Exclude files matching pattern (can be repeated)
+
 Examples:
   $(basename "$0") --worktree /path/to/worktree --base main --output impl.md
+  $(basename "$0") --worktree /path --base main --output impl.md --exclude "*.env"
 EOF
+}
+
+# Default sensitive file patterns to exclude from full content display
+SENSITIVE_PATTERNS=(
+  "*.env"
+  "*.env.*"
+  ".env*"
+  "*credentials*"
+  "*secret*"
+  "*.pem"
+  "*.key"
+  "*.p12"
+  "*.pfx"
+  "*password*"
+  "*.secrets"
+  "config/secrets*"
+)
+
+# Redact potential secrets from content
+redact_secrets() {
+  local content="$1"
+  # Redact common secret patterns
+  echo "$content" | sed -E \
+    -e 's/(api[_-]?key|apikey|secret|password|token|auth|credential|private[_-]?key)["\x27]?\s*[:=]\s*["\x27]?[A-Za-z0-9_\-]{8,}["\x27]?/\1=<REDACTED>/gi' \
+    -e 's/(Bearer|Basic)\s+[A-Za-z0-9_\-\.]{20,}/(AUTH) <REDACTED>/gi' \
+    -e 's/ghp_[A-Za-z0-9]{36}/ghp_<REDACTED>/g' \
+    -e 's/sk-[A-Za-z0-9]{32,}/sk-<REDACTED>/g' \
+    -e 's/xox[baprs]-[A-Za-z0-9\-]{10,}/xox_<REDACTED>/g'
+}
+
+# Check if file matches sensitive patterns
+is_sensitive_file() {
+  local file="$1"
+  local basename=$(basename "$file")
+  for pattern in "${SENSITIVE_PATTERNS[@]}" "${EXCLUDE_PATTERNS[@]}"; do
+    if [[ "$basename" == $pattern ]] || [[ "$file" == $pattern ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 WORKTREE=""
 BASE_BRANCH=""
 OUTPUT=""
+REDACT=true
+EXCLUDE_PATTERNS=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --worktree) WORKTREE="$2"; shift 2 ;;
     --base) BASE_BRANCH="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
+    --redact) REDACT=true; shift ;;
+    --no-redact) REDACT=false; shift ;;
+    --exclude) EXCLUDE_PATTERNS+=("$2"); shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -89,7 +142,7 @@ cd "$WORKTREE"
   DELETED_FILES=$(git diff --name-only --diff-filter=D "$BASE_BRANCH"...HEAD 2>/dev/null || echo "")
   echo ""
 
-  # Show the actual changes per file (FULL - no truncation)
+  # Show the actual changes per file (with optional redaction)
   echo "## Changes Detail"
   echo ""
 
@@ -98,9 +151,24 @@ cd "$WORKTREE"
       if [[ -n "$file" ]]; then
         echo "### \`$file\`"
         echo ""
-        echo "\`\`\`diff"
-        git diff "$BASE_BRANCH"...HEAD -- "$file" 2>/dev/null || echo "(diff not available)"
-        echo "\`\`\`"
+
+        # Check if file is sensitive
+        if is_sensitive_file "$file"; then
+          echo "> **REDACTED**: This file matches a sensitive pattern and content is not shown."
+          echo ""
+          echo "\`\`\`"
+          echo "(sensitive file - content redacted for security)"
+          echo "\`\`\`"
+        else
+          echo "\`\`\`diff"
+          DIFF_CONTENT=$(git diff "$BASE_BRANCH"...HEAD -- "$file" 2>/dev/null || echo "(diff not available)")
+          if [[ "$REDACT" == "true" ]]; then
+            redact_secrets "$DIFF_CONTENT"
+          else
+            echo "$DIFF_CONTENT"
+          fi
+          echo "\`\`\`"
+        fi
         echo ""
       fi
     done <<< "$CHANGED_FILES"
@@ -124,7 +192,7 @@ cd "$WORKTREE"
     done <<< "$DELETED_FILES"
   fi
 
-  # New files content (show full content for new files)
+  # New files content (show full content for new files, with redaction)
   echo "## New Files Content"
   echo ""
 
@@ -136,25 +204,39 @@ cd "$WORKTREE"
           echo "### \`$file\` (new)"
           echo ""
 
-          # Detect language for syntax highlighting
-          EXT="${file##*.}"
-          case "$EXT" in
-            ts|tsx) LANG="typescript" ;;
-            js|jsx) LANG="javascript" ;;
-            py) LANG="python" ;;
-            go) LANG="go" ;;
-            rs) LANG="rust" ;;
-            rb) LANG="ruby" ;;
-            sh|bash) LANG="bash" ;;
-            json) LANG="json" ;;
-            yaml|yml) LANG="yaml" ;;
-            md) LANG="markdown" ;;
-            *) LANG="" ;;
-          esac
+          # Check if file is sensitive
+          if is_sensitive_file "$file"; then
+            echo "> **REDACTED**: This file matches a sensitive pattern and content is not shown."
+            echo ""
+            echo "\`\`\`"
+            echo "(sensitive file - content redacted for security)"
+            echo "\`\`\`"
+          else
+            # Detect language for syntax highlighting
+            EXT="${file##*.}"
+            case "$EXT" in
+              ts|tsx) LANG="typescript" ;;
+              js|jsx) LANG="javascript" ;;
+              py) LANG="python" ;;
+              go) LANG="go" ;;
+              rs) LANG="rust" ;;
+              rb) LANG="ruby" ;;
+              sh|bash) LANG="bash" ;;
+              json) LANG="json" ;;
+              yaml|yml) LANG="yaml" ;;
+              md) LANG="markdown" ;;
+              *) LANG="" ;;
+            esac
 
-          echo "\`\`\`$LANG"
-          cat "$file"
-          echo "\`\`\`"
+            echo "\`\`\`$LANG"
+            FILE_CONTENT=$(cat "$file")
+            if [[ "$REDACT" == "true" ]]; then
+              redact_secrets "$FILE_CONTENT"
+            else
+              echo "$FILE_CONTENT"
+            fi
+            echo "\`\`\`"
+          fi
           echo ""
         fi
       fi

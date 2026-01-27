@@ -64,10 +64,12 @@ done
 if [[ -f "$INPUT" ]]; then
   CONTENT=$(cat "$INPUT")
 elif [[ -d "$INPUT" ]]; then
-  # Directory - concatenate relevant files
+  # Directory - concatenate relevant files with proper newlines
   CONTENT=""
   for f in "$INPUT"/*.md "$INPUT"/*.txt "$INPUT"/*.json; do
-    [[ -f "$f" ]] && CONTENT="$CONTENT\n\n--- File: $f ---\n$(cat "$f")"
+    if [[ -f "$f" ]]; then
+      CONTENT="${CONTENT}"$'\n\n'"--- File: $f ---"$'\n'"$(cat "$f")"
+    fi
   done
 else
   echo "ERROR: Input not found: $INPUT" >&2
@@ -240,16 +242,25 @@ EOF
 TEMP_OUTPUT=$(mktemp)
 
 if command -v opencode &>/dev/null; then
-  timeout 120 opencode run \
-    -m "$MODEL" \
-    --allowedTools "" \
-    -q \
-    "$(cat "$PROMPT_FILE")" \
-    > "$TEMP_OUTPUT" 2>&1 || true
+  # Use stdin to avoid ARG_MAX limits with large contexts
+  PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+  RUN_SUCCESS=false
+
+  # Try stdin first (preferred for large prompts)
+  if timeout 120 opencode run -m "$MODEL" --allowedTools "" -q - < "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  # Try --prompt-file if available
+  elif timeout 120 opencode run -m "$MODEL" --allowedTools "" -q --prompt-file "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  # Last resort: direct argument (check size first)
+  elif [[ $PROMPT_SIZE -lt 100000 ]]; then
+    timeout 120 opencode run -m "$MODEL" --allowedTools "" -q "$(cat "$PROMPT_FILE")" > "$TEMP_OUTPUT" 2>&1 || true
+    RUN_SUCCESS=true
+  fi
 else
-  # Fallback: just truncate intelligently
+  # Fallback: just truncate intelligently (use CONTENT, not INPUT which may be a directory)
   echo "WARNING: opencode not available, using simple truncation" >&2
-  head -c 8000 "$INPUT" > "$OUTPUT"
+  head -c 8000 <<< "$CONTENT" > "$OUTPUT"
   echo "" >> "$OUTPUT"
   echo "[... content truncated for context management ...]" >> "$OUTPUT"
   rm -f "$PROMPT_FILE"
