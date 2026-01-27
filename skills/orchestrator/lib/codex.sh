@@ -1,74 +1,82 @@
 #!/bin/bash
 # Codex CLI Adapter for Clawdbot Orchestrator
-# Runs Codex (GPT-5.2-Codex) for code review
+# Runs Codex (GPT-5.2-Codex) for code review WITH FULL CONTEXT
 set -euo pipefail
 
 [[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
 
 usage() {
   cat << EOF
-Codex Review Adapter for Clawdbot
+Codex Review Adapter for Clawdbot (GPT-5.2-Codex Reviewer)
 
-Usage: $(basename "$0") <workdir> <base_branch> <output_file> [options]
-
-Arguments:
-  workdir       Working directory to review
-  base_branch   Base branch to compare against
-  output_file   Where to save the JSON output
+Usage: $(basename "$0") [options]
 
 Options:
-  -m, --model MODEL       Model to use (default: gpt-5.2-codex)
-  --timeout SECONDS       Timeout in seconds (default: 300)
-  -q, --quiet             Suppress progress output
+  --context FILE        Path to context file (built by build-codex-context.sh)
+  --workdir PATH        Working directory (default: current)
+  --base BRANCH         Base branch for diff comparison
+  --output FILE         Where to save the JSON output
+  -m, --model MODEL     Model to use (default: gpt-5.2-codex)
+  --timeout SECONDS     Timeout in seconds (default: 600)
+  -q, --quiet           Suppress progress output
+  -h, --help            Show this help
+
+The --context file should contain the full review context including:
+- Original task
+- Implementation plan
+- What was implemented
+- Code diff
+- Test results
 
 Examples:
-  $(basename "$0") /path/to/worktree main review.json
-  $(basename "$0") . develop output.json --model gpt-5.2-codex
+  $(basename "$0") --context codex_context.md --workdir /path/to/repo --base main --output review.json
 EOF
 }
 
 # Default values
 MODEL="${CODEX_MODEL:-gpt-5.2-codex}"
-TIMEOUT=300
+TIMEOUT=600
 QUIET=false
-WORKDIR=""
-BASE_BRANCH=""
+CONTEXT_FILE=""
+WORKDIR="$(pwd)"
+BASE_BRANCH="main"
 OUTPUT_FILE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --context) CONTEXT_FILE="$2"; shift 2 ;;
+    -w|--workdir) WORKDIR="$2"; shift 2 ;;
+    --base) BASE_BRANCH="$2"; shift 2 ;;
+    --output) OUTPUT_FILE="$2"; shift 2 ;;
     -m|--model) MODEL="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
     -q|--quiet) QUIET=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
-      if [[ -z "$WORKDIR" ]]; then
+      # Legacy positional args: <workdir> <base_branch> <output_file>
+      if [[ -z "$WORKDIR" || "$WORKDIR" == "$(pwd)" ]] && [[ -d "$1" ]]; then
         WORKDIR="$1"
-      elif [[ -z "$BASE_BRANCH" ]]; then
+      elif [[ "$BASE_BRANCH" == "main" ]] && [[ ! -f "$1" ]]; then
         BASE_BRANCH="$1"
       elif [[ -z "$OUTPUT_FILE" ]]; then
         OUTPUT_FILE="$1"
       else
-        echo "Unknown argument: $1"; usage; exit 1
+        echo "Unknown argument: $1" >&2; usage >&2; exit 1
       fi
       shift
       ;;
   esac
 done
 
-[[ -z "$WORKDIR" ]] && { echo "ERROR: workdir is required"; usage; exit 1; }
-[[ -z "$BASE_BRANCH" ]] && { echo "ERROR: base_branch is required"; usage; exit 1; }
-[[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: output_file is required"; usage; exit 1; }
+[[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: --output required" >&2; usage >&2; exit 1; }
 
 # Check if Codex is installed
 if ! command -v codex &>/dev/null; then
-  echo "ERROR: codex is not installed"
-  echo "Install with: npm install -g @openai/codex-cli"
+  echo "ERROR: codex is not installed" >&2
+  echo "Install with: npm install -g @openai/codex-cli" >&2
   exit 1
 fi
-
-# Note: Codex CLI uses its own built-in authentication (codex auth login)
 
 # Create output directory if needed
 mkdir -p "$(dirname "$OUTPUT_FILE")"
@@ -76,60 +84,204 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
 # Change to working directory
 cd "$WORKDIR"
 
-[[ "$QUIET" == "false" ]] && echo "Running Codex review ($MODEL) against $BASE_BRANCH..."
+[[ "$QUIET" == "false" ]] && echo "Running Codex review ($MODEL) in $WORKDIR..."
 
-# Build the review command
-REVIEW_CMD="/review base-branch $BASE_BRANCH"
+# Build the full review prompt
+REVIEW_PROMPT=""
 
-# Run Codex with timeout
+if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
+  [[ "$QUIET" == "false" ]] && echo "Using context from: $CONTEXT_FILE"
+  REVIEW_PROMPT=$(cat "$CONTEXT_FILE")
+else
+  [[ "$QUIET" == "false" ]] && echo "No context file provided, building basic review context..."
+
+  # Build basic context from git diff
+  DIFF_STAT=$(git diff --stat "$BASE_BRANCH"...HEAD 2>/dev/null || echo "Unable to get diff stats")
+  DIFF_CONTENT=$(git diff "$BASE_BRANCH"...HEAD 2>/dev/null || echo "Unable to get diff")
+
+  REVIEW_PROMPT="# Code Review Request
+
+## Changes to Review
+
+### Files Changed
+\`\`\`
+$DIFF_STAT
+\`\`\`
+
+### Full Diff
+\`\`\`diff
+$DIFF_CONTENT
+\`\`\`
+
+## Review Criteria
+
+1. Is the code correct and complete?
+2. Are there any bugs or issues?
+3. Do tests pass (if applicable)?
+4. Is the code clean and maintainable?
+5. Are there any security concerns?
+"
+fi
+
+# Add JSON response format instructions
+FULL_PROMPT="$REVIEW_PROMPT
+
+---
+
+## REQUIRED RESPONSE FORMAT
+
+You MUST respond with valid JSON in this exact structure:
+
+\`\`\`json
+{
+  \"approved\": boolean,
+  \"summary\": \"1-2 sentence overall assessment\",
+  \"issues\": [
+    {
+      \"severity\": \"critical\" | \"major\" | \"minor\",
+      \"blocking\": boolean,
+      \"file\": \"path/to/file.ts\",
+      \"line\": number | null,
+      \"message\": \"Description of the issue\",
+      \"suggestion\": \"How to fix it\"
+    }
+  ],
+  \"missing\": [\"List of missing functionality from the plan\"],
+  \"positives\": [\"List of things done well\"]
+}
+\`\`\`
+
+RULES:
+- Set \"approved\": true ONLY if there are ZERO critical issues AND ZERO blocking issues
+- If any tests fail, that is a blocking issue
+- Be specific about file paths and line numbers
+- Provide actionable suggestions for every issue
+- If the implementation doesn't match the plan, list what's missing
+
+Respond with ONLY the JSON, no other text."
+
+# Create temp file for the prompt
+PROMPT_FILE=$(mktemp)
+echo "$FULL_PROMPT" > "$PROMPT_FILE"
+
+# Run Codex with the full context
 RESULT=0
+TEMP_OUTPUT=$(mktemp)
+
+[[ "$QUIET" == "false" ]] && echo "Sending review request to Codex..."
+
 timeout "$TIMEOUT" codex exec \
   --model "$MODEL" \
-  --json \
-  "$REVIEW_CMD" \
-  > "$OUTPUT_FILE" 2>&1 || RESULT=$?
+  "$(cat "$PROMPT_FILE")" \
+  > "$TEMP_OUTPUT" 2>&1 || RESULT=$?
+
+rm -f "$PROMPT_FILE"
 
 # Check result
 if [[ $RESULT -eq 124 ]]; then
-  echo "ERROR: Codex review timed out after ${TIMEOUT}s"
-  cat > "$OUTPUT_FILE" << 'EOF'
-{
-  "error": "timeout",
-  "message": "Codex review timed out",
-  "approved": false,
-  "issues": [
-    {
-      "severity": "error",
-      "message": "Review timed out - unable to complete analysis",
-      "blocking": true
-    }
-  ]
-}
-EOF
-  exit 1
-elif [[ $RESULT -ne 0 ]]; then
-  echo "WARNING: Codex exited with code $RESULT"
-fi
-
-# Validate JSON output
-if ! jq empty "$OUTPUT_FILE" 2>/dev/null; then
-  echo "WARNING: Invalid JSON output from Codex, wrapping..."
-  CONTENT=$(cat "$OUTPUT_FILE")
+  echo "ERROR: Codex review timed out after ${TIMEOUT}s" >&2
   cat > "$OUTPUT_FILE" << EOF
 {
-  "raw_output": $(echo "$CONTENT" | jq -Rs .),
   "approved": false,
+  "summary": "Review timed out after ${TIMEOUT}s",
+  "issues": [{"severity": "critical", "blocking": true, "file": null, "line": null, "message": "Review process timed out", "suggestion": "Try again or simplify the review scope"}],
+  "missing": [],
+  "positives": []
+}
+EOF
+  rm -f "$TEMP_OUTPUT"
+  exit 1
+elif [[ $RESULT -ne 0 ]]; then
+  echo "WARNING: Codex exited with code $RESULT" >&2
+fi
+
+# Process output - extract and validate JSON
+if [[ -f "$TEMP_OUTPUT" && -s "$TEMP_OUTPUT" ]]; then
+  # Try to parse as JSON directly
+  if jq -e . "$TEMP_OUTPUT" > /dev/null 2>&1; then
+    # Valid JSON - normalize structure
+    jq '{
+      approved: (.approved // false),
+      summary: (.summary // "No summary provided"),
+      issues: (.issues // []),
+      missing: (.missing // []),
+      positives: (.positives // [])
+    }' "$TEMP_OUTPUT" > "$OUTPUT_FILE"
+  else
+    # Try to extract JSON from mixed output (between first { and last })
+    JSON_EXTRACTED=$(mktemp)
+
+    # Try multiple extraction strategies
+    # 1. Look for ```json ... ``` blocks
+    if grep -q '```json' "$TEMP_OUTPUT"; then
+      sed -n '/```json/,/```/p' "$TEMP_OUTPUT" | sed '1d;$d' > "$JSON_EXTRACTED"
+    # 2. Look for { ... } pattern
+    elif grep -q '{' "$TEMP_OUTPUT"; then
+      # Get content between first { and last }
+      awk '/{/{p=1} p; /}/{if(p) exit}' "$TEMP_OUTPUT" > "$JSON_EXTRACTED"
+    fi
+
+    # Validate extracted JSON
+    if [[ -s "$JSON_EXTRACTED" ]] && jq -e . "$JSON_EXTRACTED" > /dev/null 2>&1; then
+      jq '{
+        approved: (.approved // false),
+        summary: (.summary // "No summary provided"),
+        issues: (.issues // []),
+        missing: (.missing // []),
+        positives: (.positives // [])
+      }' "$JSON_EXTRACTED" > "$OUTPUT_FILE"
+    else
+      # Failed to extract valid JSON - create error response
+      RAW_OUTPUT=$(cat "$TEMP_OUTPUT" | head -500 | jq -Rs .)
+      cat > "$OUTPUT_FILE" << EOF
+{
+  "approved": false,
+  "summary": "Failed to parse Codex response as JSON",
   "issues": [
     {
-      "severity": "warning",
-      "message": "Could not parse Codex output",
-      "blocking": false
+      "severity": "critical",
+      "blocking": true,
+      "file": null,
+      "line": null,
+      "message": "Codex output was not valid JSON",
+      "suggestion": "Check Codex configuration or retry"
     }
-  ]
+  ],
+  "missing": [],
+  "positives": [],
+  "_raw_output": $RAW_OUTPUT
+}
+EOF
+    fi
+
+    rm -f "$JSON_EXTRACTED"
+  fi
+else
+  # Empty output
+  cat > "$OUTPUT_FILE" << EOF
+{
+  "approved": false,
+  "summary": "Codex returned empty output",
+  "issues": [{"severity": "critical", "blocking": true, "file": null, "line": null, "message": "No response from Codex", "suggestion": "Check Codex authentication and try again"}],
+  "missing": [],
+  "positives": []
 }
 EOF
 fi
 
+rm -f "$TEMP_OUTPUT"
+
 [[ "$QUIET" == "false" ]] && echo "Review saved to: $OUTPUT_FILE"
+
+# Show quick summary
+if [[ "$QUIET" == "false" ]]; then
+  APPROVED=$(jq -r '.approved // false' "$OUTPUT_FILE" 2>/dev/null || echo "false")
+  SUMMARY=$(jq -r '.summary // "No summary"' "$OUTPUT_FILE" 2>/dev/null || echo "Parse error")
+  ISSUE_COUNT=$(jq -r '.issues | length' "$OUTPUT_FILE" 2>/dev/null || echo "?")
+  echo "---"
+  echo "Approved: $APPROVED"
+  echo "Issues: $ISSUE_COUNT"
+  echo "Summary: $SUMMARY"
+fi
 
 exit 0

@@ -55,47 +55,73 @@ cd "$WORKTREE"
   echo "\`\`\`"
   echo ""
 
-  # List of modified files
-  echo "## Modified Files"
+  # List of all file changes (including deleted/renamed)
+  echo "## File Changes"
   echo ""
-  CHANGED_FILES=$(git diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null || echo "")
 
-  if [[ -n "$CHANGED_FILES" ]]; then
-    while IFS= read -r file; do
-      if [[ -n "$file" ]]; then
-        # Determine what happened to the file
-        if git show "$BASE_BRANCH:$file" &>/dev/null; then
-          echo "- \`$file\` (modified)"
-        else
-          echo "- \`$file\` (created)"
-        fi
+  # Get detailed file status (Added, Modified, Deleted, Renamed)
+  FILE_STATUS=$(git diff --name-status "$BASE_BRANCH"...HEAD 2>/dev/null || echo "")
+
+  if [[ -n "$FILE_STATUS" ]]; then
+    echo "| Status | File |"
+    echo "|--------|------|"
+    while IFS=$'\t' read -r status file renamed_to; do
+      if [[ -n "$status" ]]; then
+        case "$status" in
+          A) echo "| Created | \`$file\` |" ;;
+          M) echo "| Modified | \`$file\` |" ;;
+          D) echo "| **Deleted** | \`$file\` |" ;;
+          R*) echo "| Renamed | \`$file\` → \`$renamed_to\` |" ;;
+          C*) echo "| Copied | \`$file\` → \`$renamed_to\` |" ;;
+          *) echo "| $status | \`$file\` |" ;;
+        esac
       fi
-    done <<< "$CHANGED_FILES"
+    done <<< "$FILE_STATUS"
   else
     echo "(No files changed)"
   fi
   echo ""
 
-  # Show the actual changes per file
+  # Get list of changed files for further processing
+  CHANGED_FILES=$(git diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null || echo "")
+
+  # Also get deleted files
+  DELETED_FILES=$(git diff --name-only --diff-filter=D "$BASE_BRANCH"...HEAD 2>/dev/null || echo "")
+  echo ""
+
+  # Show the actual changes per file (FULL - no truncation)
   echo "## Changes Detail"
   echo ""
 
   if [[ -n "$CHANGED_FILES" ]]; then
     while IFS= read -r file; do
-      if [[ -n "$file" && -f "$file" ]]; then
+      if [[ -n "$file" ]]; then
         echo "### \`$file\`"
         echo ""
         echo "\`\`\`diff"
-        git diff "$BASE_BRANCH"...HEAD -- "$file" 2>/dev/null | head -100
-        LINES=$(git diff "$BASE_BRANCH"...HEAD -- "$file" 2>/dev/null | wc -l)
-        if [[ $LINES -gt 100 ]]; then
-          echo ""
-          echo "... (truncated, $LINES total lines)"
-        fi
+        git diff "$BASE_BRANCH"...HEAD -- "$file" 2>/dev/null || echo "(diff not available)"
         echo "\`\`\`"
         echo ""
       fi
     done <<< "$CHANGED_FILES"
+  fi
+
+  # Show deleted files content (what was removed)
+  if [[ -n "$DELETED_FILES" ]]; then
+    echo "## Deleted Files"
+    echo ""
+    echo "> These files were deleted during implementation"
+    echo ""
+    while IFS= read -r file; do
+      if [[ -n "$file" ]]; then
+        echo "### \`$file\` (DELETED)"
+        echo ""
+        echo "\`\`\`diff"
+        git show "$BASE_BRANCH:$file" 2>/dev/null | head -50 || echo "(content not available)"
+        echo "\`\`\`"
+        echo ""
+      fi
+    done <<< "$DELETED_FILES"
   fi
 
   # New files content (show full content for new files)
@@ -127,12 +153,7 @@ cd "$WORKTREE"
           esac
 
           echo "\`\`\`$LANG"
-          head -200 "$file"
-          LINES=$(wc -l < "$file")
-          if [[ $LINES -gt 200 ]]; then
-            echo ""
-            echo "... (truncated, $LINES total lines)"
-          fi
+          cat "$file"
           echo "\`\`\`"
           echo ""
         fi

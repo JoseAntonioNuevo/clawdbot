@@ -47,6 +47,7 @@ done
 
 [[ -z "$PLAN_FILE" ]] && { echo "ERROR: --plan required" >&2; exit 1; }
 [[ -z "$TASK_FILE" ]] && { echo "ERROR: --task required" >&2; exit 1; }
+[[ -z "$CODEBASE_FILE" ]] && { echo "ERROR: --codebase required" >&2; exit 1; }
 [[ -z "$OUTPUT" ]] && { echo "ERROR: --output required" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUTPUT")"
@@ -128,11 +129,11 @@ mkdir -p "$(dirname "$OUTPUT")"
         echo "### Iteration $i"
         echo ""
 
-        # What you implemented before
+        # What you implemented before (FULL - no truncation)
         if [[ -f "$ITER_DIR/kimi_implementation.md" ]]; then
           echo "#### What You Implemented"
           echo ""
-          cat "$ITER_DIR/kimi_implementation.md" | head -100
+          cat "$ITER_DIR/kimi_implementation.md"
           echo ""
         fi
 

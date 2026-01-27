@@ -125,15 +125,10 @@ mkdir -p "$(dirname "$OUTPUT")"
     echo "\`\`\`"
     echo ""
 
-    # Show the actual diff (limited)
+    # Show the actual diff (FULL - no truncation for complete context)
     echo "### Code Changes (Diff)"
     echo "\`\`\`diff"
-    git diff "$BASE_BRANCH"...HEAD 2>/dev/null | head -500 || echo "(No diff available)"
-    DIFF_LINES=$(git diff "$BASE_BRANCH"...HEAD 2>/dev/null | wc -l)
-    if [[ $DIFF_LINES -gt 500 ]]; then
-      echo ""
-      echo "... (truncated, $DIFF_LINES total lines)"
-    fi
+    git diff "$BASE_BRANCH"...HEAD 2>/dev/null || echo "(No diff available)"
     echo "\`\`\`"
   else
     echo "(Worktree not found: $WORKTREE)"
