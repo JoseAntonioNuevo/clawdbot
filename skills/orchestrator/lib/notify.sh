@@ -28,6 +28,7 @@ Options:
 Environment Variables:
   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM, NOTIFY_WHATSAPP_TO
   CALLMEBOT_PHONE, CALLMEBOT_APIKEY
+  RESEND_API_KEY, RESEND_FROM, NOTIFY_EMAIL_TO
   SENDGRID_API_KEY, NOTIFY_EMAIL_TO, NOTIFY_EMAIL_FROM
 
 Examples:
@@ -179,6 +180,35 @@ send_callmebot_whatsapp() {
   return $?
 }
 
+# Send via Resend email (modern, simple)
+send_resend_email() {
+  if [[ -z "${RESEND_API_KEY:-}" || -z "${NOTIFY_EMAIL_TO:-}" ]]; then
+    return 1
+  fi
+
+  log "Sending via Resend email..."
+
+  local subject=""
+  case "$TYPE" in
+    success) subject="✅ Clawdbot: Task Complete - ${TASK:0:50}" ;;
+    failure) subject="❌ Clawdbot: Task Failed - ${TASK:0:50}" ;;
+    progress) subject="🔄 Clawdbot: Progress Update - ${TASK:0:50}" ;;
+  esac
+
+  # Use the send-resend-email.sh script
+  local quiet_flag=""
+  [[ "$QUIET" == "true" ]] && quiet_flag="-q"
+
+  "$SCRIPT_DIR/send-resend-email.sh" \
+    --to "$NOTIFY_EMAIL_TO" \
+    --subject "$subject" \
+    --body "$MESSAGE" \
+    $quiet_flag \
+    2>/dev/null
+
+  return $?
+}
+
 # Send via SendGrid email
 send_sendgrid_email() {
   if [[ -z "${SENDGRID_API_KEY:-}" || -z "${NOTIFY_EMAIL_TO:-}" ]]; then
@@ -216,7 +246,11 @@ send_notification() {
         send_twilio_whatsapp && sent=true
         [[ "$sent" == "false" ]] && send_callmebot_whatsapp && sent=true
         ;;
-      email)
+      email|resend)
+        send_resend_email && sent=true
+        [[ "$sent" == "false" ]] && send_sendgrid_email && sent=true
+        ;;
+      sendgrid)
         send_sendgrid_email && sent=true
         ;;
       *)
@@ -228,6 +262,7 @@ send_notification() {
     # Try in order of preference
     send_twilio_whatsapp && sent=true
     [[ "$sent" == "false" ]] && send_callmebot_whatsapp && sent=true
+    [[ "$sent" == "false" ]] && send_resend_email && sent=true
     [[ "$sent" == "false" ]] && send_sendgrid_email && sent=true
   fi
 
