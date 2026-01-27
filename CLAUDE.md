@@ -118,9 +118,19 @@ WORKTREE_BASE=~/ai-worktrees
 
 - `git` - Version control
 - `gh` - GitHub CLI (for PR creation)
-- `opencode` - OpenCode CLI (calls Kimi K2.5)
-- `codex` - Codex CLI (calls GPT-5.2-Codex)
-- `claude` - Claude Code CLI (fallback to Opus 4.5)
+- `kimi` - Kimi CLI (primary implementer - Kimi K2) **RECOMMENDED**
+- `opencode` - OpenCode CLI (alternative implementer - supports multiple models)
+- `codex` - Codex CLI (code reviewer)
+- `claude` - Claude Code CLI (fallback implementer - Opus 4.5)
+
+### Kimi CLI vs OpenCode
+
+| Tool | Use Case | Stability |
+|------|----------|-----------|
+| **Kimi CLI** | Default for Kimi K2 tasks | ✅ More stable, native client |
+| **OpenCode** | Alternative/multi-model | ⚠️ May hang on some tasks |
+
+The skill uses Kimi CLI by default and falls back to OpenCode if needed.
 
 ## Design Decisions
 
