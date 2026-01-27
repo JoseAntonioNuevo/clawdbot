@@ -56,22 +56,39 @@ You are the master orchestrator (powered by GLM 4.7) for automated coding tasks.
 │         │                                    │  APPROVED?  │           │
 │         │                                    └──────┬──────┘           │
 │         │                                           │                   │
-│         │  ┌────────────────────────────────────────┤                   │
-│         │  │ NO: Full context passed back:          │ YES               │
-│         │  │ • Original task                        │                   │
-│         │  │ • All previous plans                   ▼                   │
-│         │  │ • What Kimi implemented          ┌──────────┐             │
-│         │  │ • Current codebase state         │ CREATE   │             │
-│         │  │ • Codex feedback & issues        │   PR     │             │
-│         │  │ • Test results                   └──────────┘             │
-│         │  │ • Iteration history                    │                   │
-│         └──┘                                        ▼                   │
-│                                               ┌──────────┐             │
-│                                               │ NOTIFY   │             │
-│                                               │ SUCCESS  │             │
-│                                               └──────────┘             │
+│         │                              NO           │ YES               │
+│         │                               │           │                   │
+│         │                               ▼           ▼                   │
+│         │                        ┌─────────────┐  ┌──────────┐         │
+│         │                        │   GLM 4.7   │  │ CREATE   │         │
+│         │                        │ REFORMULATOR│  │   PR     │         │
+│         │                        │             │  └──────────┘         │
+│         │                        │ • Receives  │        │              │
+│         │                        │   ALL data  │        ▼              │
+│         │                        │ • Creates   │  ┌──────────┐         │
+│         │                        │   concise   │  │ NOTIFY   │         │
+│         │                        │   prompt    │  │ SUCCESS  │         │
+│         │                        │ • Focuses   │  └──────────┘         │
+│         │                        │   on fixes  │                       │
+│         │                        └──────┬──────┘                       │
+│         │                               │                              │
+│         │       Reformulated prompt     │                              │
+│         │       (clean & focused)       │                              │
+│         └───────────────────────────────┘                              │
+│                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### The Reformulator (NEW)
+
+When Codex rejects an implementation, **GLM 4.7** acts as the **Context Reformulator**:
+
+1. **Receives everything**: Task, plan, implementation, Codex feedback, test results, history
+2. **Synthesizes intelligently**: Creates a coherent narrative of what happened
+3. **Prioritizes**: Focuses on blocking issues and what MUST change
+4. **Outputs a clean prompt**: Concise but complete context for Claude
+
+This is NOT simple truncation - GLM 4.7 understands the context and creates an optimized prompt.
 
 ## Context Management (CRITICAL)
 
@@ -229,14 +246,24 @@ for ITERATION in $(seq 1 $MAX_ITERATIONS); do
 
   echo "▶ Phase 1: Claude Code (Opus 4.5) - Planning..."
 
-  # Build full context for Claude
-  ./lib/build-claude-context.sh \
-    --task "$LOG_DIR/context/original_task.md" \
-    --codebase "$LOG_DIR/context/codebase_summary.md" \
-    --history "$LOG_DIR/iterations" \
-    --worktree "$WORKTREE_PATH" \
-    --iteration "$ITERATION" \
-    --output "$ITER_DIR/claude_input_context.md"
+  # Check if we have a reformulated prompt from the previous iteration
+  REFORMULATED_INPUT="$ITER_DIR/claude_reformulated_input.md"
+
+  if [[ -f "$REFORMULATED_INPUT" ]]; then
+    # Use the GLM 4.7 reformulated prompt (iteration > 1)
+    echo "  Using reformulated prompt from GLM 4.7..."
+    cp "$REFORMULATED_INPUT" "$ITER_DIR/claude_input_context.md"
+  else
+    # First iteration: build context from scratch
+    echo "  Building initial context..."
+    ./lib/build-claude-context.sh \
+      --task "$LOG_DIR/context/original_task.md" \
+      --codebase "$LOG_DIR/context/codebase_summary.md" \
+      --history "$LOG_DIR/iterations" \
+      --worktree "$WORKTREE_PATH" \
+      --iteration "$ITERATION" \
+      --output "$ITER_DIR/claude_input_context.md"
+  fi
 
   # Run Claude Code for planning
   ./lib/claude-code.sh \
@@ -320,7 +347,30 @@ for ITERATION in $(seq 1 $MAX_ITERATIONS); do
     break
   fi
 
-  echo "❌ Not approved. Preparing context for next iteration..."
+  echo "❌ Not approved. Reformulating context for next iteration..."
+
+  # ─────────────────────────────────────────────────────────────
+  # PHASE 5: GLM 4.7 - REFORMULATE CONTEXT FOR NEXT ITERATION
+  # ─────────────────────────────────────────────────────────────
+
+  echo "▶ Phase 5: GLM 4.7 (Reformulator) - Creating optimized prompt..."
+
+  # Use GLM 4.7 to create a clean, focused prompt for Claude
+  ./lib/reformulate-context.sh \
+    --task "$LOG_DIR/context/original_task.md" \
+    --plan "$ITER_DIR/claude_plan.md" \
+    --implementation "$ITER_DIR/kimi_implementation.md" \
+    --codex-feedback "$ITER_DIR/codex_review.json" \
+    --test-results "$ITER_DIR/test_results.txt" \
+    --history "$LOG_DIR/iterations" \
+    --codebase "$LOG_DIR/context/codebase_summary.md" \
+    --iteration "$ITERATION" \
+    --output "$ITER_DIR/reformulated_prompt.md"
+
+  # Save the reformulated prompt for the NEXT iteration's Claude input
+  NEXT_ITER_DIR="$LOG_DIR/iterations/iter_$(printf '%03d' $((ITERATION + 1)))"
+  mkdir -p "$NEXT_ITER_DIR"
+  cp "$ITER_DIR/reformulated_prompt.md" "$NEXT_ITER_DIR/claude_reformulated_input.md"
 
   # Update cumulative context with failure details
   ./lib/update-cumulative-context.sh \
@@ -517,10 +567,58 @@ Provide structured JSON with:
 
 ---
 
+### reformulate-context.sh (NEW - GLM 4.7)
+
+The Reformulator uses GLM 4.7 to create an optimized prompt after Codex rejection:
+
+**Input** (receives EVERYTHING):
+- Original task
+- Claude's plan
+- Kimi's implementation (diff)
+- Codex review feedback (why it failed)
+- Test results
+- Previous iteration history
+- Codebase summary
+
+**Output** (clean, focused prompt):
+```markdown
+# Revised Implementation Request - Iteration N
+
+## Task
+[1-2 sentence summary]
+
+## What Was Tried
+[Brief summary of approach - what worked, what didn't]
+
+## Why It Failed (Codex Feedback)
+### Critical/Blocking Issues (MUST FIX)
+[List with file:line references and specific fix suggestions]
+
+### Other Issues
+[Brief list of non-blocking issues]
+
+## What the New Plan Must Address
+1. [Specific thing to fix]
+2. [Another specific thing]
+...
+
+## Files Involved
+- `path/to/file.ts` - [what needs to change]
+```
+
+**Why GLM 4.7?**
+- 200K context window: Can see ALL context at once
+- Interleaved thinking: Better instruction following
+- Cost-effective: 1/7th the price of Claude
+- Specialized for agentic workflows (87.4 τ²-Bench)
+
+---
+
 ## Key Principles
 
 1. **Context is King**: Every agent gets the FULL picture - task, history, code, feedback
-2. **Nothing is Lost**: Every iteration is logged and available for analysis
-3. **Clear Handoffs**: Each agent knows exactly what it needs to do
-4. **Cumulative Learning**: Later iterations build on earlier ones
-5. **Fail Forward**: Each failure provides information for the next attempt
+2. **Intelligent Reformulation**: GLM 4.7 synthesizes context, not just concatenates
+3. **Nothing is Lost**: Every iteration is logged and available for analysis
+4. **Clear Handoffs**: Each agent knows exactly what it needs to do
+5. **Cumulative Learning**: Later iterations build on earlier ones
+6. **Fail Forward**: Each failure provides focused information for the next attempt
