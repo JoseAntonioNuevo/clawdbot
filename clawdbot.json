@@ -1,0 +1,55 @@
+{
+  "$schema": "https://docs.clawd.bot/schemas/workspace.json",
+  "name": "intelligent-implementer",
+  "version": "1.0.0",
+
+  "models": {
+    "default": "zai/glm-4.7",
+    "providers": {
+      "zai": {
+        "apiKey": "{env:ZAI_API_KEY}",
+        "baseURL": "https://api.z.ai/api/coding/paas/v4"
+      }
+    },
+    "allowlist": [
+      "zai/glm-4.7"
+    ]
+  },
+
+  "tools": {
+    "opencode": {
+      "description": "Primary implementer (GLM 4.7)",
+      "auth": "cli"
+    },
+    "codex": {
+      "description": "Code reviewer (GPT-5.2-Codex)",
+      "auth": "cli"
+    },
+    "claude": {
+      "description": "Fallback implementer (Opus 4.5)",
+      "auth": "cli"
+    }
+  },
+
+  "skills": {
+    "load": {
+      "paths": ["./skills"]
+    }
+  },
+
+  "permissions": {
+    "shell": true,
+    "fileSystem": true,
+    "network": true
+  },
+
+  "settings": {
+    "worktreeBase": "{env:WORKTREE_BASE:-~/ai-worktrees}",
+    "maxOpencodeIterations": 80,
+    "maxClaudeIterations": 10,
+    "stuckDetectionWindow": 5,
+    "maxParallelTasks": 5,
+    "defaultBaseBranch": "main",
+    "autoRunTests": true
+  }
+}

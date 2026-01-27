@@ -1,0 +1,31 @@
+{
+  "name": "clawdbot-intelligent-implementer",
+  "version": "1.0.0",
+  "description": "AI orchestrator for automated coding tasks using OpenCode, Codex, and Claude Code",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "doctor": "./tools/doctor.sh",
+    "install-deps": "./tools/install.sh",
+    "cleanup": "./tools/cleanup.sh",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.0",
+    "twilio": "^5.0.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ai",
+    "orchestrator",
+    "opencode",
+    "codex",
+    "claude",
+    "automation"
+  ],
+  "author": "Jose",
+  "license": "MIT"
+}

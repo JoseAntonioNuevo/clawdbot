@@ -1,0 +1,106 @@
+# Clawdbot Intelligent Implementer - Default Settings
+# These can be overridden via environment variables
+
+orchestrator:
+  # Maximum OpenCode (GLM 4.7) iterations before escalating
+  maxOpencodeIterations: 80
+
+  # Maximum Claude Code (Opus 4.5) iterations before failing
+  maxClaudeIterations: 10
+
+  # Number of iterations to analyze for stuck detection
+  stuckDetectionWindow: 5
+
+  # Maximum parallel tasks across all projects
+  maxParallelTasks: 5
+
+git:
+  # Default base branch for new worktrees
+  defaultBaseBranch: main
+
+  # Branch prefix for AI-created branches
+  branchPrefix: "ai/"
+
+  # Auto-stash uncommitted changes before creating worktree
+  autoStash: false
+
+worktree:
+  # Base directory for worktrees
+  basePath: ~/ai-worktrees
+
+  # Auto-cleanup worktrees after PR merge (days)
+  autoCleanupDays: 7
+
+testing:
+  # Auto-detect and run tests after each iteration
+  autoRunTests: true
+
+  # Test commands to try (in order)
+  testCommands:
+    - "npm test"
+    - "yarn test"
+    - "pnpm test"
+    - "pytest"
+    - "go test ./..."
+    - "cargo test"
+    - "bundle exec rspec"
+    - "make test"
+
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+
+  # Keep logs for N days
+  retentionDays: 30
+
+  # Include full diffs in logs
+  includeDiffs: true
+
+notifications:
+  # Send notification on success
+  onSuccess: true
+
+  # Send notification on failure
+  onFailure: true
+
+  # Send progress updates every N iterations (0 = disabled)
+  progressInterval: 0
+
+  # Preferred notification method: whatsapp, email, discord
+  preferredMethod: whatsapp
+
+codex:
+  # Model for code review
+  model: gpt-5.2-codex
+
+  # Review command
+  reviewCommand: "/review base-branch {base_branch}"
+
+  # Consider approved if no critical/blocking issues
+  autoApprove: true
+
+opencode:
+  # Model for implementation
+  model: zai/glm-4.7
+
+  # Allowed tools
+  allowedTools:
+    - Bash
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+
+claude:
+  # Model for fallback implementation
+  model: claude-opus-4.5
+
+  # Allowed tools
+  allowedTools:
+    - Bash
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
