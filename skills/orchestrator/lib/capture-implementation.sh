@@ -44,15 +44,20 @@ SENSITIVE_PATTERNS=(
 )
 
 # Redact potential secrets from content
+# Compatible with both BSD sed (macOS) and GNU sed (Linux)
 redact_secrets() {
   local content="$1"
-  # Redact common secret patterns
+  # Use a quote character class that works on BSD sed: [\"'] using $'...' syntax
+  # \047 is octal for single quote
+  local SQ=$'\047'  # Single quote character
+
   echo "$content" | sed -E \
-    -e 's/(api[_-]?key|apikey|secret|password|token|auth|credential|private[_-]?key)["\x27]?\s*[:=]\s*["\x27]?[A-Za-z0-9_\-]{8,}["\x27]?/\1=<REDACTED>/gi' \
-    -e 's/(Bearer|Basic)\s+[A-Za-z0-9_\-\.]{20,}/(AUTH) <REDACTED>/gi' \
+    -e "s/(api[_-]?key|apikey|secret|password|token|auth|credential|private[_-]?key)[\"${SQ}]?[[:space:]]*[:=][[:space:]]*[\"${SQ}]?[A-Za-z0-9_-]{8,}[\"${SQ}]?/\1=<REDACTED>/gi" \
+    -e "s/(Bearer|Basic)[[:space:]]+[A-Za-z0-9_.-]{20,}/(AUTH) <REDACTED>/gi" \
     -e 's/ghp_[A-Za-z0-9]{36}/ghp_<REDACTED>/g' \
     -e 's/sk-[A-Za-z0-9]{32,}/sk-<REDACTED>/g' \
-    -e 's/xox[baprs]-[A-Za-z0-9\-]{10,}/xox_<REDACTED>/g'
+    -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/xox_<REDACTED>/g' \
+    -e "s/[\"${SQ}][A-Za-z0-9_-]{20,}[\"${SQ}]([[:space:]]*[,}])/\"<REDACTED>\"\1/g"
 }
 
 # Check if file matches sensitive patterns
