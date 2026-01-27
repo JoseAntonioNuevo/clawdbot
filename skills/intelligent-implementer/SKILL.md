@@ -4,8 +4,8 @@ user-invocable: true
 command-dispatch: tool
 description: |
   Intelligent Implementer - Orchestrates automated coding tasks.
-  Uses Kimi CLI or OpenCode (Kimi K2) to implement, Codex to review,
-  and Claude Code as fallback. Creates PRs and sends notifications.
+  Uses Claude Code (Opus 4.5) for research and planning, Kimi K2.5 for implementation,
+  and Codex for code review. Creates PRs and sends notifications.
 
   ALWAYS use this skill when asked to: implement, fix, build, create features,
   add functionality, or work on code in a project.
@@ -16,105 +16,79 @@ metadata:
   clawdbot:
     emoji: "🦞"
     requires:
-      bins: ["git", "gh", "codex"]
+      bins: ["git", "gh", "codex", "claude"]
       anyBins: ["kimi", "opencode"]
       env: ["RESEND_API_KEY"]
 ---
 
+# STOP! READ THIS FIRST!
+
+## 🚫 YOU ARE FORBIDDEN FROM WRITING CODE 🚫
+
+**YOU ARE NOT ALLOWED TO:**
+- Use the `edit` tool
+- Use the `write` tool
+- Modify any file directly
+- Write any code yourself
+
+**IF YOU TRY TO USE `edit` OR `write`, YOU ARE VIOLATING THIS SKILL.**
+
+You are the **ORCHESTRATOR**. You call other agents to do the work.
+
+---
+
 # Intelligent Implementer Orchestrator
 
-## ⚠️ CRITICAL: YOU ARE AN ORCHESTRATOR, NOT AN IMPLEMENTER
+## Architecture Overview
 
-**YOU CANNOT AND MUST NOT WRITE CODE DIRECTLY.**
+```
+YOU (GPT-5.2 Orchestrator) - Coordinates everything
+  │
+  │ STEP 0: Create worktree
+  │
+  ├─→ STEP 1: Claude Code (Opus 4.5) - RESEARCH & PLANNING
+  │     • Search internet for best practices 2026
+  │     • Analyze the codebase
+  │     • Read CLAUDE.md for project context
+  │     • Generate detailed implementation plan
+  │
+  ├─→ STEP 2: Kimi K2.5 - IMPLEMENTATION (code only)
+  │     • Receive the plan from Claude
+  │     • Implement following the plan exactly
+  │     • ONLY write implementation code
+  │     • NO tests, NO documentation (GLM will do that)
+  │
+  ├─→ STEP 3: GLM-4.7 via OpenCode - TESTS & DOCS
+  │     • Analyze the implementation from Kimi
+  │     • Generate comprehensive unit tests
+  │     • Generate integration tests if needed
+  │     • Generate/update documentation (JSDoc, docstrings, README sections)
+  │     • 100% test coverage goal
+  │
+  ├─→ STEP 4: Codex - CODE REVIEW
+  │     • Review implementation + tests against the plan
+  │     • Verify test coverage
+  │     • Approve or reject with feedback
+  │
+  └─→ STEP 5: PR + Notification
+```
 
-You are the **ORCHESTRATOR**. Your job is to:
-- Call coding agents (Kimi CLI, OpenCode, Claude Code) to write code
-- Wait for their responses
-- Evaluate their output
-- Coordinate the workflow
+### Cost Optimization
 
-**FORBIDDEN ACTIONS:**
-- ❌ Writing code directly using `edit` or `write` tools
-- ❌ "Implementing directly because agents are slow"
-- ❌ Making code changes yourself
-- ❌ Saying "I'll implement this myself"
+| Agent | Task | Cost |
+|-------|------|------|
+| Claude Code (Opus 4.5) | Research & Planning | Paid |
+| Kimi K2.5 | Implementation (code only) | Paid |
+| **GLM-4.7** | **Tests + Documentation** |  |
+| Codex | Code Review | Paid |
 
-**REQUIRED ACTIONS:**
-- ✅ Always use `kimi --print` or `opencode run` for implementation
-- ✅ Wait for the coding agent to complete (even if it takes time)
-- ✅ If one agent fails, try the next one in the chain
-- ✅ Only Claude Code CLI (`claude -p`) as last resort
-
-**If an agent seems slow or stuck:**
-1. Wait at least 60 seconds
-2. If no response, try the alternative agent
-3. If all agents fail, escalate to Claude Code CLI
-4. NEVER implement the code yourself
+By using GLM-4.7 for tests and docs, you save Kimi tokens while getting excellent coverage (GLM-4.7: 84.9% LiveCodeBench).
 
 ---
 
-## Your Role
+## Complete Workflow
 
-You are the **COORDINATOR** of a multi-agent system:
-
-```
-YOU (Orchestrator)
-  │
-  ├─→ Kimi CLI (Primary Implementer) ──→ writes code
-  │
-  ├─→ OpenCode (Fallback Implementer) ──→ writes code
-  │
-  ├─→ Codex CLI (Reviewer) ──→ reviews code
-  │
-  └─→ Claude Code CLI (Last Resort) ──→ writes code if others fail
-```
-
-When the user asks you to implement something, YOU:
-1. Create the isolated environment (worktree)
-2. Describe the task clearly for the coding agent
-3. **CALL** Kimi CLI to implement (you don't implement!)
-4. **CALL** Codex to review
-5. Evaluate the review and decide next steps
-6. Create the PR with title/description YOU generate
-7. Send notification with summary YOU write
-
-## Implementation Tools
-
-You have TWO options for calling Kimi K2. **Use Kimi CLI by default** (more stable):
-
-### Option A: Kimi CLI (RECOMMENDED - Default)
-```bash
-kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [Codex feedback if any]. First read CLAUDE.md if it exists for project context, then implement following best practices."
-```
-
-**IMPORTANT:**
-- The `-p` flag must come AFTER `--work-dir`
-- Prompt must be a single line without leading newlines
-- Always instruct to read CLAUDE.md first for project-specific guidance
-
-**Why Kimi CLI is default:**
-- Native client from Moonshot AI
-- `--print` mode is non-interactive and auto-approves
-- More stable, fewer hanging issues
-- Designed specifically for Kimi K2
-
-### Option B: OpenCode (Alternative)
-```bash
-cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task description]. [Codex feedback if any]. First read CLAUDE.md if it exists for project context, then implement following best practices."
-```
-
-**When to use OpenCode:**
-- If Kimi CLI fails or is unavailable
-- If you need to switch to a different model mid-task
-- If the user explicitly requests it
-
-**Note:** OpenCode may hang on some tasks. If it doesn't respond within 60 seconds, switch to Kimi CLI.
-
----
-
-## Workflow
-
-### Step 1: Initialization
+### Step 0: Initialization
 
 Extract from the user's message:
 - `PROJECT_PATH`: Path to the git repository
@@ -127,130 +101,312 @@ cd PROJECT_PATH && git rev-parse --git-dir
 ```
 
 Generate identifiers:
-- `TASK_ID`: `$(date +%Y%m%d-%H%M%S)-$(echo "$TASK" | md5sum | cut -c1-8)`
-- `BRANCH_NAME`: `ai/<descriptive-name-you-decide>`
+- `TASK_ID`: `$(date +%Y%m%d-%H%M%S)`
+- `BRANCH_NAME`: Use Git branch naming conventions based on task type:
+
+| Task Type | Prefix | Example |
+|-----------|--------|---------|
+| New feature | `feature/` | `feature/add-dark-mode` |
+| Bug fix | `fix/` | `fix/login-timeout` |
+| Urgent fix | `hotfix/` | `hotfix/security-patch` |
+| Refactor | `refactor/` | `refactor/auth-module` |
+| Documentation | `docs/` | `docs/api-reference` |
+| Performance | `perf/` | `perf/optimize-queries` |
+| Chore/maintenance | `chore/` | `chore/update-deps` |
+
+**Rules for branch names:**
+- Use lowercase with hyphens (kebab-case)
+- Keep it short but descriptive (3-5 words max)
+- No spaces, underscores, or special characters
+- Examples:
+  - "Add user authentication" → `feature/add-user-auth`
+  - "Fix the login bug" → `fix/login-bug`
+  - "Speech-to-text not working" → `fix/speech-to-text`
+  - "Improve database performance" → `perf/database-queries`
 
 Create isolated worktree:
 ```bash
-./skills/intelligent-implementer/lib/worktree.sh create \
+/Users/jose/clawd/skills/intelligent-implementer/lib/worktree.sh create \
   --project PROJECT_PATH \
   --branch BRANCH_NAME \
   --task-id TASK_ID \
   --base BASE_BRANCH
 ```
-Save the returned worktree path.
 
-### Step 2: Planning
+Save the returned `WORKTREE_PATH`.
 
-Analyze the codebase and create a mental plan:
-- What files need changes?
-- What tests exist?
-- What's the best strategy?
+---
 
-You DON'T need to write the plan to a file. YOU hold it in context.
+### Step 1: Research & Planning with Claude Code (Opus 4.5)
 
-### Step 3: Implementation Loop (max 80 iterations)
+**THIS IS THE MOST IMPORTANT STEP.**
 
-For each iteration:
+Claude Code (Opus 4.5) will:
+1. Search the internet for best practices and modern techniques (2026)
+2. Analyze the project codebase
+3. Read CLAUDE.md for project-specific context
+4. **If project uses Supabase**: Query database schema via MCP
+5. Generate a detailed implementation plan
 
-**1. Call Kimi K2 (use Kimi CLI by default):**
+**Command:**
 ```bash
-kimi --print --work-dir WORKTREE_PATH -p "TASK: [task description]. [Previous Codex feedback if any]. Read CLAUDE.md first if exists, then implement following best practices."
+cd WORKTREE_PATH && claude -p "$(cat <<'EOF'
+You are a senior software architect preparing an implementation plan.
+
+## TASK
+[Insert the user's task description here]
+
+## YOUR MISSION
+
+### Phase 1: Research (MANDATORY)
+Search the internet for:
+- Best practices for this type of implementation in 2026
+- Modern patterns and techniques
+- Common pitfalls to avoid
+- Security considerations
+
+Use WebSearch to find current information. Do NOT rely on outdated knowledge.
+
+### Phase 2: Codebase Analysis
+- Read CLAUDE.md if it exists for project context
+- Identify all files that need to be modified
+- Understand the existing architecture and patterns
+- Find related tests that need updating
+
+### Phase 3: Database Schema (IF SUPABASE PROJECT)
+If the project uses Supabase (check package.json or .env for supabase):
+1. Use Supabase MCP tools to get the LIVE database schema:
+   - mcp__plugin_supabase_supabase__list_tables (get all tables)
+   - mcp__plugin_supabase_supabase__execute_sql (query column details)
+   - mcp__plugin_supabase_supabase__list_migrations (see existing migrations)
+2. Document the current schema in your plan
+3. Identify what database changes are needed
+4. Plan the migration files (Kimi will create them, NOT apply them)
+
+IMPORTANT: Do NOT apply migrations. Only plan them. Migrations will be reviewed in PR.
+
+### Phase 4: Implementation Plan
+Create a detailed plan with:
+1. Files to modify (with exact paths)
+2. Changes needed in each file
+3. New files to create (if any)
+4. **Database migrations needed** (if Supabase project)
+5. Tests to add or update
+6. Potential edge cases to handle
+
+## OUTPUT FORMAT
+Respond with a structured plan in this format:
+
+```
+## RESEARCH FINDINGS
+[Key findings from internet search]
+
+## CURRENT DATABASE SCHEMA (if Supabase)
+[Tables and columns relevant to this task]
+
+## DATABASE MIGRATIONS NEEDED (if Supabase)
+- Migration 1: [description] - supabase/migrations/YYYYMMDDHHMMSS_name.sql
+- Migration 2: [description] - supabase/migrations/YYYYMMDDHHMMSS_name.sql
+
+## FILES TO MODIFY
+- path/to/file1.ts: [what to change]
+- path/to/file2.ts: [what to change]
+
+## NEW FILES
+- path/to/new/file.ts: [purpose]
+
+## IMPLEMENTATION STEPS
+1. [First step with details]
+2. [Second step with details]
+...
+
+## TESTS TO UPDATE
+- path/to/test.ts: [what to test]
+
+## EDGE CASES
+- [Edge case 1]
+- [Edge case 2]
+
+## SECURITY CONSIDERATIONS
+- [Security item 1]
 ```
 
-**Note:** Keep the prompt on a single line. No leading newlines or the CLI will fail.
-
-If Kimi CLI fails or hangs, fall back to OpenCode:
-```bash
-cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task description]. [feedback if any]. Read CLAUDE.md first if exists, then implement."
+DO NOT implement anything. Only research and plan.
+DO NOT apply database migrations. Only plan them.
+EOF
+)" --allowedTools "Bash,Read,Glob,Grep,WebSearch,WebFetch,mcp__plugin_supabase_supabase__list_tables,mcp__plugin_supabase_supabase__execute_sql,mcp__plugin_supabase_supabase__list_migrations,mcp__plugin_supabase_supabase__list_projects"
 ```
 
-**2. Capture changes:**
+**IMPORTANT:**
+- Claude Code MUST use `WebSearch` to find current best practices
+- Claude Code MUST read CLAUDE.md if it exists
+- Claude Code MUST query Supabase MCP if project uses Supabase
+- Claude Code MUST NOT implement anything - only plan
+- Claude Code MUST NOT apply migrations - only plan them
+- Save the plan output as `IMPLEMENTATION_PLAN`
+
+---
+
+### Step 2: Implementation with Kimi K2.5 (CODE + MIGRATIONS - NO TESTS)
+
+Pass the plan from Claude to Kimi K2.5 for implementation.
+
+**IMPORTANT:**
+- Kimi implements code ONLY, NOT tests (GLM-4.7 will generate tests)
+- If plan includes database migrations, Kimi creates the SQL files but does NOT run them
+- Migrations go in `supabase/migrations/YYYYMMDDHHMMSS_description.sql`
+
+**Command:**
 ```bash
-git diff BASE_BRANCH...HEAD
+kimi --print --work-dir WORKTREE_PATH -p "TASK: [original task]. IMPLEMENTATION PLAN FROM CLAUDE: [paste the plan here]. Follow this plan exactly. Read CLAUDE.md first if it exists. Implement ONLY the code changes - DO NOT write tests. Tests will be generated separately. If the plan includes DATABASE MIGRATIONS: Create the migration SQL files in supabase/migrations/ with timestamp filenames (YYYYMMDDHHMMSS_description.sql). DO NOT run the migrations - only create the files. They will be applied after PR review."
 ```
 
-**3. Run tests** (if they exist):
+**IMPORTANT:**
+- The `-p` flag must come AFTER `--work-dir`
+- Prompt must be a single line without leading newlines
+- Include the full plan from Claude
+- Explicitly tell Kimi NOT to write tests
+
+**If Kimi fails, try OpenCode with Kimi model:**
 ```bash
-npm test  # or pytest, go test, etc. based on project
+cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task]. PLAN: [plan]. Implement code only, NO tests."
 ```
 
-**4. Call Codex for review:**
+**If both fail, escalate to Claude Code for implementation:**
 ```bash
-codex exec "
-  Review the following changes:
-
-  [diff]
-
-  Respond in JSON:
-  {
-    \"approved\": true|false,
-    \"issues\": [{\"file\": \"...\", \"message\": \"...\"}]
-  }
-"
+cd WORKTREE_PATH && claude -p "TASK: [task]. PLAN: [plan]. Implement code only, no tests." --allowedTools "Bash,Read,Write,Edit"
 ```
 
-**5. Evaluate the result** (YOU read the JSON directly):
-- If `approved: true` → Go to Step 4 (Create PR)
-- If there are issues → Continue loop with feedback
-- If stuck (same issues 5 times) → Go to Step 3.5
+---
 
-### Step 3.5: Escalation to Claude Code (max 10 iterations)
+### Step 3: Tests & Documentation with GLM-4.7 via OpenCode 
+After implementation, use GLM-4.7 to generate tests AND documentation.
 
-If Kimi is stuck, call Claude Code **in the worktree directory** (so it reads the project's CLAUDE.md automatically):
+**Why GLM-4.7 for tests & docs:**
+- 84.9% on LiveCodeBench (excellent for test generation)
+- Saves Kimi K2.5 tokens for pure implementation
+
+**Command:**
 ```bash
-cd WORKTREE_PATH && claude -p "CONTEXT: Kimi K2 tried this task but is stuck. ORIGINAL TASK: [task]. LATEST CODEX ISSUES: [issues]. Read CLAUDE.md first if it exists, then resolve these problems." --allowedTools "Bash,Read,Write,Edit"
+cd WORKTREE_PATH && opencode run -m "glm-4.7" "TASK: Generate tests and documentation for the recent implementation.
+
+IMPLEMENTATION PLAN:
+[paste the plan from Claude]
+
+IMPLEMENTATION DIFF:
+$(git diff BASE_BRANCH...HEAD)
+
+YOUR MISSION:
+
+## Tests
+1. Analyze the code changes
+2. Generate unit tests for all new/modified functions
+3. Generate integration tests if applicable
+4. Aim for 100% test coverage of new code
+5. Follow existing test patterns in the project
+
+## Documentation
+1. Add JSDoc/docstrings to all new functions
+2. Update README if new features were added
+3. Add inline comments for complex logic
+4. Update any existing docs affected by changes
+
+Read CLAUDE.md for project conventions.
+
+OUTPUT: Create/update test files AND documentation."
 ```
 
-**Important:** Claude Code automatically reads `CLAUDE.md` from the working directory. This file contains project-specific guidance, architecture decisions, and coding standards that Claude should follow.
-
-### Step 4: Create PR (YOU generate all content)
-
-**1. Commit changes:**
+**If GLM-4.7 fails, try Kimi as backup:**
 ```bash
-git add -A
-git commit -m "$(cat <<'EOF'
-[YOU generate commit message based on changes]
+kimi --print --work-dir WORKTREE_PATH -p "Generate tests and documentation for the implementation. Plan: [plan]. Focus on 100% coverage and clear docs."
+```
 
-Co-Authored-By: Clawdbot <noreply@clawd.bot>
+---
+
+### Step 4: Code Review with Codex
+
+After implementation AND test generation, review everything with Codex.
+
+**Command:**
+```bash
+DIFF=$(cd WORKTREE_PATH && git diff BASE_BRANCH...HEAD)
+codex exec "Review the following code changes AND tests against this implementation plan:
+
+PLAN:
+[paste the plan from Claude]
+
+DIFF (includes implementation + tests):
+$DIFF
+
+Verify:
+1. All planned changes were implemented
+2. Code follows best practices
+3. No security issues
+4. Tests cover all new functionality
+5. Test coverage is adequate (aim for 100% of new code)
+
+Respond in JSON:
+{
+  \"approved\": true|false,
+  \"issues\": [{\"file\": \"...\", \"message\": \"...\", \"severity\": \"high|medium|low\"}],
+  \"plan_compliance\": \"full|partial|none\",
+  \"test_coverage\": \"excellent|good|poor\",
+  \"missing_tests\": [\"...\"]
+}"
+```
+
+**Evaluation:**
+- If `approved: true` → Go to Step 5
+- If `approved: false` with code issues → Loop back to Step 2 (Kimi)
+- If `approved: false` with test issues → Loop back to Step 3 (GLM)
+- If stuck (same issues 5 times) → Report failure
+
+---
+
+### Step 5: Create PR
+
+**1. Run tests:**
+```bash
+cd WORKTREE_PATH && npm test  # or pytest, go test, etc.
+```
+
+**2. Commit changes:**
+```bash
+cd WORKTREE_PATH && git add -A && git commit -m "$(cat <<'EOF'
+[YOU generate a clean, professional commit message based on changes]
+
+[Write it as if a human developer wrote it - NO mentions of AI, LLMs, agents, or Clawdbot]
 EOF
 )"
 ```
 
-**2. Push and create PR:**
+**3. Push and create PR:**
 ```bash
 git push -u origin BRANCH_NAME
 
 gh pr create \
-  --title "[YOU generate concise title based on task]" \
+  --title "[YOU generate concise title]" \
   --body "$(cat <<'EOF'
 ## Summary
-[YOU write 1-3 bullets of changes]
+[YOU write 1-3 bullets of changes - write as a human developer would]
 
-## Original Task
-> [user's task]
+## Changes
+[Brief technical description of what was changed and why]
 
-## Implementation
-- Implementer: Kimi K2 (via Kimi CLI / OpenCode)
-- Iterations: [N]
-- Reviewer: Codex
-
----
-🦞 Generated by Clawdbot
+## Testing
+[How the changes were tested]
 EOF
 )"
 ```
 
-**3. Save PR URL** for notification.
+---
 
 ### Step 5: Notification
 
-Send email with summary YOU write:
-
 ```bash
-./skills/intelligent-implementer/lib/send-resend-email.sh \
+/Users/jose/clawd/skills/intelligent-implementer/lib/send-resend-email.sh \
   --to "$NOTIFY_EMAIL_TO" \
-  --subject "✅ Clawdbot: [descriptive title YOU decide]" \
+  --subject "✅ Clawdbot: [descriptive title]" \
   --body "$(cat <<'EOF'
 🦞 CLAWDBOT TASK COMPLETE
 
@@ -258,105 +414,110 @@ Task: [task]
 Project: [project]
 PR: [url]
 
-[YOU write summary of what was done and why]
+## What was done
+[Summary of implementation]
+
+## Research Highlights
+[Key findings from Claude's research]
+
+## Agents Used
+- Claude Code (Opus 4.5): Research & Planning
+- Kimi K2.5: Implementation (code only)
+- GLM-4.7: Tests & Documentation
+- Codex: Code Review
 
 Iterations: [N]
 EOF
 )"
 ```
 
-### Step 6: Failure Handling
-
-If after 80 Kimi iterations + 10 Claude iterations it's not approved:
-
-1. **DON'T create PR** - code isn't ready
-2. **Send failure notification** with:
-   - What was attempted
-   - Pending issues
-   - Where code is for manual review
-   - YOU suggest next steps based on your understanding
-
 ---
 
-## Important Rules
+## Critical Rules
 
 1. **YOU ARE THE ORCHESTRATOR** - You coordinate, you don't implement
-2. **NEVER write code directly** - Always use coding agents (kimi, opencode, claude)
-3. **YOU generate content** - PR titles, messages, emails... you write those (not code!)
-4. **YOU evaluate** - Read agent outputs and Codex reviews, make decisions
-5. **YOU decide** - When to escalate, when to stop, which agent to use next
-6. **Kimi CLI first** - Always try `kimi --print` before `opencode run`
-7. **Be patient** - Coding agents may take time. Wait for them. Don't take over.
-8. **Chain of agents** - Kimi → OpenCode → Claude Code CLI. Never "implement directly"
+2. **NEVER use `edit` or `write`** - Always call external agents
+3. **Claude Code FIRST** - Always research and plan before implementing
+4. **Internet research is MANDATORY** - Claude must use WebSearch
+5. **Follow the plan** - Kimi must implement exactly what Claude planned
+6. **Be patient** - Agents may take time. Wait for them.
 
 ---
 
-## Stuck Detection
-
-YOU detect if stuck by observing:
-- Same Codex issues appearing 5 times in a row?
-- Diff not changing significantly between iterations?
-- Tests failing the same way?
-- Tool not responding for >60 seconds?
-
-**When stuck, follow this escalation path:**
+## Agent Chain
 
 ```
-Kimi CLI stuck (>60s)
-  │
-  └─→ Try OpenCode
-        │
-        └─→ OpenCode stuck (>60s)
-              │
-              └─→ Try Claude Code CLI
-                    │
-                    └─→ Claude Code CLI stuck
-                          │
-                          └─→ Report failure to user
-```
+ALWAYS follow this order:
 
-**⚠️ NEVER say "I'll implement it directly" - that's not your job!**
+1. Claude Code (Opus 4.5) - PAID
+   └─→ Research best practices 2026 (WebSearch)
+   └─→ Analyze codebase
+   └─→ Generate implementation plan
 
----
+2. Kimi K2.5 - PAID (code only)
+   └─→ Implement following Claude's plan
+   └─→ NO tests, NO docs (GLM does that)
+   └─→ If fails → OpenCode → Claude Code CLI
 
-## Tool Selection Logic
+3. GLM-4.7 via OpenCode
+   └─→ Generate comprehensive tests
+   └─→ Generate documentation (JSDoc, docstrings, README)
+   └─→ Aim for 100% coverage
+   └─→ If fails → Kimi as backup
 
-```
-START
-  │
-  ▼
-Try Kimi CLI (kimi --print)
-  │
-  ├─ Success → Continue workflow
-  │
-  └─ Fails/Hangs (>60s) → Try OpenCode
-                            │
-                            ├─ Success → Continue workflow
-                            │
-                            └─ Fails → Escalate to Claude Code
+4. Codex - PAID
+   └─→ Review code + tests against plan
+   └─→ Approve or reject
+
+5. PR + Notification
 ```
 
 ---
 
-## Usage Examples
+## Example
 
-**User**: "Implement a /health endpoint in the project /path/to/api"
+**User**: "Fix the speech-to-text streaming in /Users/jose/Documents/growth/megrowth"
 
-**YOU**:
-1. Create worktree: `ai/add-health-endpoint`
-2. Call Kimi CLI: `kimi --print -p "Create /health endpoint returning {status: 'ok'}"`
-3. Codex reviews: approved: true
-4. Create PR: "Add /health endpoint for service monitoring"
-5. Send email: "✅ Added /health endpoint - PR #42 ready for review"
+**YOU (Orchestrator)**:
 
-**User**: "Fix the login timeout bug"
+1. **Create worktree**: `fix/speech-to-text-streaming`
 
-**YOU**:
-1. Analyze code, find where login is
-2. Create worktree: `ai/fix-login-timeout`
-3. Call Kimi CLI with specific bug context
-4. Codex rejects: "Doesn't handle network errors"
-5. Call Kimi CLI again with feedback
-6. Codex approves
-7. Create PR: "Fix login timeout by adding retry logic and error handling"
-8. Send email with explanation of what caused bug and how it was fixed
+2. **Call Claude Code for research & planning**:
+   - Claude searches: "Deepgram Nova-3 WebSocket streaming best practices 2026"
+   - Claude searches: "React real-time audio transcription patterns"
+   - Claude analyzes: `/api/realtime/token/route.ts`, `useRealtimeTranscription.ts`
+   - Claude reads: `CLAUDE.md`, `docs/10-voice-input.md`
+   - Claude outputs: Detailed plan with files, changes, tests
+
+3. **Call Kimi K2.5 with the plan** (code only):
+   - Kimi implements all code changes from Claude's plan
+   - Kimi does NOT write tests or documentation
+
+4. **Call GLM-4.7 for tests & docs**:
+   - GLM analyzes the implementation
+   - GLM generates unit tests
+   - GLM generates integration tests
+   - GLM adds JSDoc/docstrings to new functions
+   - GLM updates README if needed
+   - 100% coverage of new code
+
+5. **Call Codex for review**:
+   - Codex verifies plan compliance
+   - Codex verifies test coverage
+   - Codex approves
+
+6. **Create PR**: "Fix speech-to-text streaming with WebSocket token generation"
+
+7. **Send notification** with summary and research highlights
+
+---
+
+## Forbidden Actions
+
+| Action | Why Forbidden |
+|--------|---------------|
+| Using `edit` tool | You are orchestrator, not implementer |
+| Using `write` tool | You are orchestrator, not implementer |
+| Skipping Claude research | Missing best practices leads to poor implementation |
+| Implementing without plan | Unplanned code is buggy code |
+| Ignoring Codex feedback | Quality matters |
