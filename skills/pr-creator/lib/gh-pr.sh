@@ -92,7 +92,16 @@ if ! gh auth status &>/dev/null 2>&1; then
   exit 1
 fi
 
-cd "$WORKDIR"
+# Validate and change to working directory
+if [[ ! -d "$WORKDIR" ]]; then
+  echo "ERROR: Working directory does not exist: $WORKDIR" >&2
+  exit 1
+fi
+
+if ! cd "$WORKDIR" 2>/dev/null; then
+  echo "ERROR: Failed to change to working directory: $WORKDIR" >&2
+  exit 1
+fi
 
 # Extract metadata from state file
 IMPLEMENTER="OpenCode (GLM 4.7)"
@@ -195,7 +204,11 @@ fi
 
 # Ensure branch is pushed
 log "Ensuring branch is pushed..."
-git push -u origin "$HEAD_BRANCH" 2>/dev/null || true
+if ! git push -u origin "$HEAD_BRANCH" 2>&1; then
+  echo "ERROR: Failed to push branch '$HEAD_BRANCH' to origin" >&2
+  echo "Check your remote configuration and network connectivity" >&2
+  exit 1
+fi
 
 # Build gh pr create command
 CMD=(gh pr create)

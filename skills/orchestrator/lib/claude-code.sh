@@ -94,8 +94,30 @@ fi
 # Create output directory if needed
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
-# Change to working directory
-cd "$WORKDIR"
+# Helper to write structured error output
+write_error_output() {
+  local message="$1"
+  cat > "$OUTPUT_FILE" << EOF
+# Error
+
+**Error**: $message
+
+Unable to complete the requested operation.
+EOF
+}
+
+# Validate and change to working directory
+if [[ ! -d "$WORKDIR" ]]; then
+  echo "ERROR: Working directory does not exist: $WORKDIR" >&2
+  write_error_output "Working directory does not exist: $WORKDIR"
+  exit 1
+fi
+
+if ! cd "$WORKDIR" 2>/dev/null; then
+  echo "ERROR: Failed to change to working directory: $WORKDIR" >&2
+  write_error_output "Failed to change to working directory: $WORKDIR"
+  exit 1
+fi
 
 [[ "$QUIET" == "false" ]] && echo "Running Claude Code (Opus 4.5) - Mode: $MODE"
 [[ "$QUIET" == "false" ]] && echo "Working directory: $WORKDIR"
@@ -140,16 +162,38 @@ $SYSTEM_PROMPT
 $PROMPT
 EOF
 
-# Build command - capture output as markdown
-CMD=(claude)
-CMD+=(-p "$(cat "$PROMPT_FILE")")
-CMD+=(--allowedTools "$TOOLS")
+PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+[[ "$QUIET" == "false" ]] && echo "Prompt size: $PROMPT_SIZE bytes"
 
 # Run Claude Code with timeout, capturing markdown output
+# Use stdin or prompt-file to avoid ARG_MAX limits
 RESULT=0
 TEMP_OUTPUT=$(mktemp)
+RUN_SUCCESS=false
 
-timeout "$TIMEOUT" "${CMD[@]}" > "$TEMP_OUTPUT" 2>&1 || RESULT=$?
+# Try stdin first (preferred for large prompts)
+if timeout "$TIMEOUT" claude --allowedTools "$TOOLS" - < "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RUN_SUCCESS=true
+# Try --prompt-file if available
+elif timeout "$TIMEOUT" claude --allowedTools "$TOOLS" --prompt-file "$PROMPT_FILE" > "$TEMP_OUTPUT" 2>&1; then
+  RUN_SUCCESS=true
+# Last resort: direct argument (check size first to avoid ARG_MAX)
+elif [[ $PROMPT_SIZE -lt 100000 ]]; then
+  if timeout "$TIMEOUT" claude -p "$(cat "$PROMPT_FILE")" --allowedTools "$TOOLS" > "$TEMP_OUTPUT" 2>&1; then
+    RUN_SUCCESS=true
+  else
+    RESULT=$?
+  fi
+else
+  echo "ERROR: Prompt too large ($PROMPT_SIZE bytes) and claude doesn't support stdin/file input" >&2
+  write_error_output "Prompt too large ($PROMPT_SIZE bytes) for Claude CLI"
+  rm -f "$PROMPT_FILE" "$TEMP_OUTPUT"
+  exit 1
+fi
+
+if [[ "$RUN_SUCCESS" != "true" && $RESULT -eq 0 ]]; then
+  RESULT=1
+fi
 
 rm -f "$PROMPT_FILE"
 

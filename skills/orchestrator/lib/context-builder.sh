@@ -51,6 +51,12 @@ done
 [[ -z "$LOG_DIR" ]] && { echo "ERROR: --log-dir is required"; exit 1; }
 [[ -z "$OUTPUT_FILE" ]] && { echo "ERROR: --output is required"; exit 1; }
 
+# Validate worktree directory
+if [[ ! -d "$WORKTREE_PATH" ]]; then
+  echo "ERROR: Worktree directory does not exist: $WORKTREE_PATH" >&2
+  exit 1
+fi
+
 # Create output directory
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
@@ -151,7 +157,10 @@ cat >> "$OUTPUT_FILE" << EOF
 \`\`\`diff
 EOF
 
-cd "$WORKTREE_PATH"
+if ! cd "$WORKTREE_PATH" 2>/dev/null; then
+  echo "ERROR: Failed to change to worktree directory: $WORKTREE_PATH" >&2
+  exit 1
+fi
 git diff "$BASE_BRANCH"...HEAD 2>/dev/null | head -n "$MAX_DIFF_LINES" >> "$OUTPUT_FILE" || echo "No diff available" >> "$OUTPUT_FILE"
 
 # Add truncation notice if needed

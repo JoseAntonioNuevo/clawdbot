@@ -3,10 +3,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../../config/env.template" 2>/dev/null || true
+CLAWDBOT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+source "${CLAWDBOT_ROOT}/config/env.template" 2>/dev/null || true
 [[ -f "$HOME/.clawdbot-orchestrator.env" ]] && source "$HOME/.clawdbot-orchestrator.env"
 
 WORKTREE_BASE="${WORKTREE_BASE:-$HOME/ai-worktrees}"
+LOG_BASE="${LOG_BASE:-$CLAWDBOT_ROOT/logs}"
+
+# Safety: validate a path is under WORKTREE_BASE before deletion
+is_safe_worktree_path() {
+  local path="$1"
+  local real_path real_base
+
+  # Resolve to absolute paths
+  real_path=$(cd "$path" 2>/dev/null && pwd) || return 1
+  real_base=$(cd "$WORKTREE_BASE" 2>/dev/null && pwd) || return 1
+
+  # Check if path is under WORKTREE_BASE
+  [[ "$real_path" == "$real_base"/* ]]
+}
 
 usage() {
   cat << EOF
@@ -145,9 +160,16 @@ remove_worktree() {
     fi
   fi
 
-  # Fallback: just delete the directory
-  rm -rf "$worktree_path"
-  echo "Removed directory: $worktree_path"
+  # Fallback: delete directory ONLY if under WORKTREE_BASE (safety check)
+  if is_safe_worktree_path "$worktree_path"; then
+    rm -rf "$worktree_path"
+    echo "Removed directory: $worktree_path"
+  else
+    echo "ERROR: Refusing to delete path outside WORKTREE_BASE: $worktree_path" >&2
+    echo "WORKTREE_BASE is: $WORKTREE_BASE" >&2
+    echo "Use --force with explicit confirmation for paths outside the safe root." >&2
+    exit 1
+  fi
 }
 
 list_worktrees() {
@@ -186,7 +208,7 @@ list_worktrees() {
       fi
 
       # Check for state file
-      local log_dir="/Users/jose/Documents/clawdbot/logs/$project_name/$task_id"
+      local log_dir="$LOG_BASE/$project_name/$task_id"
       if [[ -f "$log_dir/state.json" ]]; then
         status=$(jq -r '.status' "$log_dir/state.json" 2>/dev/null || echo "unknown")
       fi
