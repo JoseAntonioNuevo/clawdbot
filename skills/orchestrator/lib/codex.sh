@@ -106,8 +106,24 @@ if ! command -v codex &>/dev/null; then
   exit 1
 fi
 
-# Change to working directory
-cd "$WORKDIR"
+# Validate and change to working directory
+if [[ ! -d "$WORKDIR" ]]; then
+  echo "ERROR: Working directory does not exist: $WORKDIR" >&2
+  write_error_json "Working directory does not exist: $WORKDIR" "Ensure the worktree or project directory exists"
+  exit 1
+fi
+
+if [[ ! -x "$WORKDIR" ]]; then
+  echo "ERROR: Working directory is not accessible: $WORKDIR" >&2
+  write_error_json "Working directory is not accessible: $WORKDIR" "Check directory permissions"
+  exit 1
+fi
+
+if ! cd "$WORKDIR" 2>/dev/null; then
+  echo "ERROR: Failed to change to working directory: $WORKDIR" >&2
+  write_error_json "Failed to change to working directory: $WORKDIR" "Check directory exists and is accessible"
+  exit 1
+fi
 
 [[ "$QUIET" == "false" ]] && echo "Running Codex review ($MODEL) in $WORKDIR..."
 
