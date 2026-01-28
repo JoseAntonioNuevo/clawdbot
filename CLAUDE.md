@@ -250,9 +250,12 @@ safe-kill.sh 12345 3600   # Explicit: 1 hour minimum
 GPT-5.2 tends to kill agents prematurely (after seconds instead of waiting). This wrapper enforces the minimum wait time at the system level - it will BLOCK kill attempts before the minimum time (default: 1 hour) has elapsed.
 
 **Why wrappers are used:**
-1. File-based output capture (clawdbot's exec doesn't capture stdout properly)
-2. Consistent argument passing and working directory handling
-3. safe-kill wrapper prevents premature agent kills
+1. **PTY creation via expect** - CLIs hang when spawned from processes without a controlling terminal (like clawdbot gateway). The wrappers use `/usr/bin/expect` to create a pseudo-terminal.
+2. **File-based output capture** - Clawdbot's exec doesn't capture stdout properly from background processes. Output goes to `.claude-output.txt` etc.
+3. **Terminal code cleanup** - Removes ANSI escape sequences from output.
+4. **safe-kill wrapper** prevents premature agent kills.
+
+**System requirement:** `/usr/bin/expect` must be available (standard on macOS).
 
 ## Environment Variables
 
