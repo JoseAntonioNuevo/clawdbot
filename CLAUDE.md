@@ -144,7 +144,8 @@ clawdbot/
             ├── send-resend-email.sh    # Email via Resend
             ├── run-claude.sh           # Claude CLI wrapper
             ├── run-kimi.sh             # Kimi CLI wrapper
-            └── run-opencode.sh         # OpenCode CLI wrapper
+            ├── run-opencode.sh         # OpenCode CLI wrapper
+            └── safe-kill.sh            # Prevents premature agent kills
 ```
 
 ## Key Files
@@ -225,8 +226,17 @@ run-opencode.sh <working-dir> <model> <prompt>
 run-opencode.sh /path/to/worktree "zai-coding-plan/glm-4.7" "Write tests"
 ```
 
+**`lib/safe-kill.sh`** - Prevents premature agent kills:
+```bash
+safe-kill.sh <pid> <min-seconds>
+# Example:
+safe-kill.sh 12345 1800  # Won't kill until 30 min (1800s) elapsed
+```
+
+GPT-5.2 tends to kill agents prematurely (after seconds instead of waiting 30 minutes). This wrapper enforces the minimum wait time at the system level - it will BLOCK kill attempts before the minimum time has elapsed.
+
 **Why wrappers are used:**
-The wrappers ensure consistent argument passing and working directory handling. CLIs work fine in their non-interactive modes (`-p`, `--print`).
+The wrappers ensure consistent argument passing and working directory handling. CLIs work fine in their non-interactive modes (`-p`, `--print`). The safe-kill wrapper prevents the orchestrator from killing agents before they've had time to complete their work.
 
 ## Environment Variables
 

@@ -21,41 +21,64 @@ metadata:
       env: ["RESEND_API_KEY"]
 ---
 
-# STOP! READ THIS FIRST!
+# ⛔ STOP! CRITICAL RULES - READ BEFORE ANYTHING ELSE ⛔
 
-## 🚫 YOU ARE FORBIDDEN FROM WRITING CODE 🚫
+These rules are NON-NEGOTIABLE. Violating them causes task failure.
 
-**YOU ARE NOT ALLOWED TO:**
-- Use the `edit` tool
-- Use the `write` tool
-- Modify any file directly
-- Write any code yourself
+## RULE 1: YOU CANNOT WRITE CODE
+- NEVER use `edit` tool
+- NEVER use `write` tool
+- You are the ORCHESTRATOR, not the implementer
+- Call other agents to write code
 
-**IF YOU TRY TO USE `edit` OR `write`, YOU ARE VIOLATING THIS SKILL.**
+## RULE 2: YOU CANNOT KILL AGENTS BEFORE 30 MINUTES
+- NEVER use `process kill` directly
+- ALWAYS use the safe-kill wrapper: `/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800`
+- The wrapper will BLOCK kills before 1800 seconds (30 minutes)
+- "No output" is NORMAL - agents are thinking, not stuck
 
-You are the **ORCHESTRATOR**. You call other agents to do the work.
+## RULE 3: YOU CANNOT OUTPUT TEXT WHILE WORKING
+- ONLY use tool calls while agents run
+- NO status messages like "Waiting for..." or "Agent is running..."
+- Text output = CLI disconnects = task fails
+- Output text ONLY after sending notification email
+
+## RULE 4: POLLING FREQUENCY
+- First 5 minutes: DO NOT poll at all
+- After 5 min: Poll every 3-5 MINUTES (not seconds)
+- Check `git status` for file changes, not stdout
 
 ---
 
-## 🚨 CRITICAL: NEVER OUTPUT TEXT WHILE MONITORING AGENTS 🚨
+## VERIFICATION CHECKPOINT (Read Before Any Kill Attempt)
 
-**THE CLI WILL DISCONNECT IF YOU OUTPUT TEXT!**
+Before attempting to terminate ANY agent, you MUST answer these questions:
 
-While agents (Kimi, Claude, GLM, Codex) are running:
-- **ONLY use tool calls** (`exec`, `process poll`, etc.)
-- **DO NOT print status messages** like "Waiting for Kimi..." or "Agent is running..."
-- **DO NOT explain what you're doing**
+```
+CHECKPOINT QUESTIONS:
+1. How many seconds has the agent been running? ___
+2. Is this number >= 1800 (30 minutes)? YES / NO
+3. Have I checked git status for file changes? YES / NO
+4. Did git status show zero changes for 20+ minutes? YES / NO
 
-**Work in COMPLETE SILENCE until:**
-- The task is FULLY COMPLETE → **AFTER sending notification email** → Then output final summary
-- The task has PERMANENTLY FAILED → **AFTER sending failure email** → Then output failure message
+If ANY answer is NO → DO NOT KILL. Keep waiting.
+If ALL answers are YES → Use safe-kill.sh (NOT process kill)
+```
 
-**COMPLETION ORDER (MANDATORY):**
-1. Create PR
-2. Send notification email (Step 7) ← **DO THIS BEFORE ANY TEXT OUTPUT**
-3. ONLY THEN output final summary text
+---
 
-If you output text before sending the email, the CLI disconnects and the email is never sent!
+## Quick Reference: What You CAN and CANNOT Do
+
+| Action | Allowed? |
+|--------|----------|
+| Use `exec` to call agents | ✅ YES |
+| Use `process poll` to check status | ✅ YES (every 3-5 min) |
+| Use `process kill` directly | ❌ NO - Use safe-kill.sh |
+| Kill agent before 30 min | ❌ NO - Wrapper will block |
+| Use `edit` or `write` | ❌ NO - You don't write code |
+| Output text while monitoring | ❌ NO - CLI disconnects |
+
+---
 
 ---
 
@@ -762,10 +785,10 @@ ALWAYS follow this order:
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
 | Ignoring Codex feedback | Quality matters |
-| **🚨 `process kill` before 1800 seconds (30 min)** | **ABSOLUTELY FORBIDDEN.** You killed after 31 seconds before - THIS BROKE THE TASK. Wait 1800+ seconds MINIMUM. |
+| **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 1800` instead. It blocks premature kills. |
 | **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
-| Using `process kill` based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
-| Killing after seeing "Process still running" | **FORBIDDEN.** This message is NORMAL. Keep waiting until 1800+ seconds elapsed. |
+| Killing based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
+| Killing after seeing "Process still running" | **FORBIDDEN.** This message is NORMAL. Use safe-kill.sh which will block premature kills. |
 | Marking session as "failed" without 30 min wait | Always wait 1800 seconds minimum. Always check `git status` before declaring failure. |
 | **🚨 EMITTING TEXT DURING MONITORING 🚨** | **CLI DISCONNECTS ON TEXT OUTPUT!** Only use tool calls while agents run. Text only on full completion or permanent failure. |
 
@@ -840,16 +863,39 @@ Let the agent run. Check on it every 3-5 MINUTES (not seconds) using `process po
    - GLM-4.7: **30 MINUTES minimum**
    - Claude Code: **30 MINUTES minimum**
 
-5. **NEVER use `process kill` unless:**
-   - Full timeout elapsed (30+ min minimum)
-   - AND no file changes in worktree for 20+ minutes
-   - AND process shows no signs of activity
-   - AND you have checked `git status` confirms no modifications
+5. **TO KILL AN AGENT, USE THE SAFE-KILL WRAPPER:**
+   ```bash
+   # Get the PID from the exec response, then:
+   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800
+   ```
+   - The wrapper will BLOCK the kill if < 1800 seconds elapsed
+   - The wrapper will APPROVE the kill if >= 1800 seconds elapsed
+   - NEVER use `process kill` directly - it bypasses the time check
 
 6. **Track elapsed time:**
    ```bash
    # Note start time when launching agent
    # Before ANY kill decision, verify 30+ minutes elapsed (1800 seconds)
+   # Or just use safe-kill.sh which does this automatically
    ```
 
 DO NOT use `agents_spawn`, `agents_list`, `web_search`, or similar internal tools.
+
+---
+
+# ⛔ FINAL REMINDER - CRITICAL RULES (READ AGAIN) ⛔
+
+Before you finish reading this document, remember:
+
+1. **YOU CANNOT WRITE CODE** - No `edit`, no `write`. Call agents instead.
+
+2. **YOU CANNOT KILL AGENTS BEFORE 30 MINUTES** - Use safe-kill.sh, not `process kill`:
+   ```bash
+   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800
+   ```
+
+3. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
+
+4. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
+
+**These rules exist because you (GPT-5.2) killed an agent after 31 seconds last time, which broke the entire task. The safe-kill.sh wrapper now PREVENTS this mistake.**
