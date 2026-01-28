@@ -394,6 +394,37 @@ IF iterations >= 5:
 
 **Why this matters:** GPT-5.2 was observed creating PRs before Codex finished, or even when Codex said `approved: false`. The hybrid approach ensures serious issues get proper analysis from Claude while minor issues can be fixed quickly.
 
+## Build Verification Loop
+
+**Even after Codex approves, build/test/lint must pass before PR.**
+
+If any verification fails, it triggers a full loop back to Claude:
+
+```
+Build/Test/Lint FAILS
+    ↓
+Claude analyzes failure → creates fix plan
+    ↓
+Kimi implements fix
+    ↓
+GLM-4.7 updates tests (if needed)
+    ↓
+Codex reviews (must approve again)
+    ↓
+Build Verification again
+    ↓
+REPEAT until ALL pass
+```
+
+**Script availability:**
+| Check | Required? | If not configured |
+|-------|-----------|-------------------|
+| `lint` | Optional | Skip, continue |
+| `test` | Optional | Skip, continue |
+| `build` | **MANDATORY** | Error - all projects need build |
+
+**Max iterations:** 5 build-fix cycles before failure notification.
+
 ## Iteration Limits
 
 - **Kimi K2.5**: Unlimited iterations for code fixes
