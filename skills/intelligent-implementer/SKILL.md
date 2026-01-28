@@ -47,10 +47,15 @@ While agents (Kimi, Claude, GLM, Codex) are running:
 - **DO NOT explain what you're doing**
 
 **Work in COMPLETE SILENCE until:**
-- The task is FULLY COMPLETE (PR created) → Then output final summary
-- The task has PERMANENTLY FAILED → Then output failure message + send email
+- The task is FULLY COMPLETE → **AFTER sending notification email** → Then output final summary
+- The task has PERMANENTLY FAILED → **AFTER sending failure email** → Then output failure message
 
-If you output text during monitoring, the CLI disconnects and orchestration fails!
+**COMPLETION ORDER (MANDATORY):**
+1. Create PR
+2. Send notification email (Step 7) ← **DO THIS BEFORE ANY TEXT OUTPUT**
+3. ONLY THEN output final summary text
+
+If you output text before sending the email, the CLI disconnects and the email is never sent!
 
 ---
 
@@ -648,16 +653,16 @@ EOF
    - ONLY kill if: 30+ min passed AND no file changes for 20+ min AND no errors
    - **Anthropic recommends 60+ minute timeouts for thinking models**
 10. **Use wrapper scripts for all agent calls** - claude, kimi, opencode require the `lib/run-*.sh` wrappers. Call them via `exec command="/path/to/lib/run-claude.sh ..." timeout=3600`.
-11. **🚨 NEVER EMIT TEXT DURING MONITORING 🚨** - The CLI disconnects when you output text!
-    - **ONLY use tool calls** while agents are running (exec, process poll, etc.)
+11. **🚨 NEVER EMIT TEXT UNTIL AFTER SENDING EMAIL 🚨** - The CLI disconnects when you output text!
+    - **ONLY use tool calls** while working (exec, process poll, etc.)
     - **DO NOT print status updates** like "Agent is running..." or "Waiting for Kimi..."
-    - **DO NOT explain what you're doing** while monitoring
-    - Text output is ONLY allowed when:
-      a) The task is FULLY COMPLETE (PR created successfully)
-      b) The task has PERMANENTLY FAILED (after all retries exhausted)
-      c) You are sending the notification email
-    - If you emit text during monitoring, the CLI will disconnect and the orchestration will fail!
-    - **Work in SILENCE until completion or failure.**
+    - **DO NOT explain what you're doing** while working
+    - **COMPLETION ORDER IS MANDATORY:**
+      1. Create PR (Step 6)
+      2. Send notification email (Step 7) ← **MUST happen before ANY text**
+      3. ONLY THEN output final summary text
+    - Text output BEFORE sending email = CLI disconnects = email never sent!
+    - **Work in SILENCE. Email FIRST. Text LAST.**
 
 ---
 
