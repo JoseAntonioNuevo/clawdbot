@@ -183,6 +183,53 @@ YOU (GPT-5.2 Orchestrator) - Coordinates everything
 
 ## Complete Workflow
 
+### 🚨 CRITICAL: STATE MACHINE - FOLLOW EXACTLY 🚨
+
+Each step has a polling loop. **When the loop exits (COMPLETED), you MUST move to the next step.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         STATE MACHINE (FOLLOW THIS)                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   STEP 0: Create worktree                                                   │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 1: Claude Code ──► POLLING LOOP ──► COMPLETED? ──YES──►             │
+│       │                        │                                            │
+│       │                    RUNNING? ──► sleep 180 ──► POLL AGAIN           │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 2: Kimi K2.5 ────► POLLING LOOP ──► COMPLETED? ──YES──►             │
+│       │                        │                                            │
+│       │                    RUNNING? ──► sleep 180 ──► POLL AGAIN           │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 3: GLM-4.7 ──────► POLLING LOOP ──► COMPLETED? ──YES──►             │
+│       │                        │                                            │
+│       │                    RUNNING? ──► sleep 180 ──► POLL AGAIN           │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 4: Codex ────────► approved: true? ──YES──►                         │
+│       │                        │                                            │
+│       │                    approved: false? ──► FIX LOOP (see below)       │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 5: Build Verification ──► ALL PASS? ──YES──►                        │
+│       │                              │                                      │
+│       │                          FAIL? ──► FIX LOOP (see below)            │
+│       │                                                                     │
+│       ▼                                                                     │
+│   STEP 6: Create PR + Send Email ──► DONE                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+KEY RULE: When status = COMPLETED, EXIT the polling loop and GO TO NEXT STEP.
+          DO NOT poll the same status file again after seeing COMPLETED.
+```
+
+---
+
 ### Step 0: Initialization
 
 Extract from the user's message:
@@ -341,31 +388,57 @@ DO NOT apply database migrations. Only plan them." \
 - Claude Code MUST NOT apply migrations - only plan them
 - Save the plan output as `IMPLEMENTATION_PLAN`
 
-**⏱️ AFTER STARTING CLAUDE - MANDATORY FILE-BASED MONITORING:**
+**⏱️ STEP 1 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
+```pseudocode
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 1: CLAUDE CODE POLLING LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 1. Start Claude agent
+exec command="run-claude.sh WORKTREE_PATH 'prompt'" timeout=3600
+
+# 2. Initial wait - DO NOT POLL during this time
+exec command="sleep 300" timeout=310
+
+# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+WHILE true:
+    # Check status file
+    STATUS = exec command="cat WORKTREE_PATH/.claude-status.txt" timeout=10
+
+    IF STATUS == "COMPLETED":
+        # ════════════════════════════════════════════════════════════════
+        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+        # ════════════════════════════════════════════════════════════════
+        BREAK
+
+    IF STATUS starts with "ERROR":
+        # Agent failed - read output for details, then decide how to proceed
+        exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
+        BREAK
+
+    # STATUS is "RUNNING" - wait and poll again
+    exec command="sleep 180" timeout=200
+
+END WHILE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 4. Read the output file (ONLY after loop exits with COMPLETED)
+IMPLEMENTATION_PLAN = exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
+
+# 5. IMMEDIATELY PROCEED TO STEP 2 - DO NOT POLL AGAIN
+# ═══════════════════════════════════════════════════════════════════════════
+# GO TO STEP 2: KIMI K2.5 IMPLEMENTATION
+# ═══════════════════════════════════════════════════════════════════════════
 ```
-1. Agent started → Record start time
-2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
-3. After 5 min → Check STATUS FILE every 3-5 minutes:
-   exec command="cat WORKTREE_PATH/.claude-status.txt" timeout=10
 
-4. STATUS FILE VALUES:
-   - "RUNNING" → Agent still working → Keep waiting
-   - "COMPLETED" → SUCCESS! Read output file
-   - "ERROR:N" → Agent failed with exit code N → Read output for error details
-
-5. When status = COMPLETED, READ THE OUTPUT FILE:
-   exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
-
-6. Save the output as IMPLEMENTATION_PLAN
-
-7. ⚠️ DO NOT:
-   - Give up because "process poll shows no output"
-   - Do your own analysis instead
-   - Proceed without reading .claude-output.txt
-```
-
-**YOU MUST WAIT FOR STATUS=COMPLETED BEFORE PROCEEDING.**
-If you proceed without reading the output file, the task will fail.
+**⚠️ CRITICAL:** When you see `COMPLETED`, you must:
+1. BREAK out of the polling loop
+2. Read the output file ONCE
+3. IMMEDIATELY start Step 2 (Kimi)
+4. DO NOT check `.claude-status.txt` again
 
 ---
 
@@ -403,24 +476,60 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 - The prompt is passed as a single argument to the wrapper
 - The wrapper handles all quoting requirements
 
-**⏱️ AFTER STARTING KIMI - MANDATORY FILE-BASED MONITORING:**
+**⏱️ STEP 2 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
+```pseudocode
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 2: KIMI K2.5 POLLING LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 1. Start Kimi agent
+exec command="run-kimi.sh WORKTREE_PATH 'prompt'" timeout=3600
+
+# 2. Initial wait - DO NOT POLL during this time
+exec command="sleep 300" timeout=310
+
+# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+WHILE true:
+    # Check status file
+    STATUS = exec command="cat WORKTREE_PATH/.kimi-status.txt" timeout=10
+
+    IF STATUS == "COMPLETED":
+        # ════════════════════════════════════════════════════════════════
+        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+        # ════════════════════════════════════════════════════════════════
+        BREAK
+
+    IF STATUS starts with "ERROR":
+        # Agent failed - read output for details
+        exec command="cat WORKTREE_PATH/.kimi-output.txt" timeout=60
+        # Try fallback or handle error
+        BREAK
+
+    # STATUS is "RUNNING" - wait and poll again
+    exec command="sleep 180" timeout=200
+
+END WHILE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 4. Verify files were changed
+exec command="cd WORKTREE_PATH && git status --short" timeout=30
+
+# 5. IMMEDIATELY PROCEED TO STEP 3 - DO NOT POLL KIMI AGAIN
+# ═══════════════════════════════════════════════════════════════════════════
+# GO TO STEP 3: GLM-4.7 TESTS & DOCUMENTATION
+# ═══════════════════════════════════════════════════════════════════════════
 ```
-1. Agent started → Record start time
-2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
-3. After 5 min → Check STATUS FILE every 3-5 minutes:
-   exec command="cat WORKTREE_PATH/.kimi-status.txt" timeout=10
 
-4. STATUS FILE VALUES:
-   - "RUNNING" → Agent still working → Keep waiting
-   - "COMPLETED" → SUCCESS! Kimi finished implementation
-   - "ERROR:N" → Agent failed → Check .kimi-output.txt for error
+**⚠️ CRITICAL:** When you see `COMPLETED`, you must:
+1. BREAK out of the polling loop
+2. Check git status ONCE
+3. IMMEDIATELY start Step 3 (GLM-4.7)
+4. DO NOT check `.kimi-status.txt` again
 
-5. When status = COMPLETED:
-   - Check git status for file changes
-   - Proceed to Step 3 (GLM-4.7 for tests)
-
-6. ⚠️ DO NOT give up and do your own implementation!
-```
+**⚠️ DO NOT give up and do your own implementation!**
 
 ## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 3600 SECONDS (1 HOUR) 🚨🚨🚨
 
@@ -533,23 +642,60 @@ Focus on edge cases and error handling in tests."
 **IMPORTANT:**
 - **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 
-**⏱️ AFTER STARTING GLM-4.7 - MANDATORY FILE-BASED MONITORING:**
+**⏱️ STEP 3 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
+```pseudocode
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 3: GLM-4.7 POLLING LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 1. Start GLM-4.7 agent
+exec command="run-opencode.sh WORKTREE_PATH 'zai-coding-plan/glm-4.7' 'prompt'" timeout=3600
+
+# 2. Initial wait - DO NOT POLL during this time
+exec command="sleep 300" timeout=310
+
+# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+WHILE true:
+    # Check status file
+    STATUS = exec command="cat WORKTREE_PATH/.opencode-status.txt" timeout=10
+
+    IF STATUS == "COMPLETED":
+        # ════════════════════════════════════════════════════════════════
+        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+        # ════════════════════════════════════════════════════════════════
+        BREAK
+
+    IF STATUS starts with "ERROR":
+        # Agent failed - read output for details
+        exec command="cat WORKTREE_PATH/.opencode-output.txt" timeout=60
+        # Handle error
+        BREAK
+
+    # STATUS is "RUNNING" - wait and poll again
+    exec command="sleep 180" timeout=200
+
+END WHILE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 4. Verify test files were created
+exec command="cd WORKTREE_PATH && git status --short" timeout=30
+
+# 5. IMMEDIATELY PROCEED TO STEP 4 - DO NOT POLL GLM AGAIN
+# ═══════════════════════════════════════════════════════════════════════════
+# GO TO STEP 4: CODEX CODE REVIEW
+# ═══════════════════════════════════════════════════════════════════════════
 ```
-1. Agent started → Record start time
-2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
-3. After 5 min → Check STATUS FILE every 3-5 minutes:
-   exec command="cat WORKTREE_PATH/.opencode-status.txt" timeout=10
 
-4. STATUS FILE VALUES:
-   - "RUNNING" → Agent still working → Keep waiting
-   - "COMPLETED" → SUCCESS! GLM finished tests/docs
-   - "ERROR:N" → Agent failed → Check .opencode-output.txt for error
+**⚠️ CRITICAL:** When you see `COMPLETED`, you must:
+1. BREAK out of the polling loop
+2. Check git status ONCE to verify tests exist
+3. IMMEDIATELY start Step 4 (Codex)
+4. DO NOT check `.opencode-status.txt` again
 
-5. When status = COMPLETED:
-   - Check git status for file changes (tests should exist)
-   - Proceed to Step 4 (Codex code review)
-
-6. ⚠️ DO NOT give up and write your own tests!
+**⚠️ DO NOT give up and write your own tests!**
 ```
 
 **If GLM-4.7 fails (status = ERROR), fallback to Claude Code:**
