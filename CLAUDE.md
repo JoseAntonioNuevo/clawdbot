@@ -348,6 +348,36 @@ cd WORKTREE && echo "=== Agent Status ===" && \
 
 If ANY shows "NOT RUN" → orchestrator must go back and run the missing agent.
 
+## Codex Approval Loop (Critical)
+
+**PR creation is BLOCKED until Codex returns `approved: true`.**
+
+The orchestrator MUST:
+1. Wait for Codex to complete (cannot proceed while running)
+2. Parse the JSON response
+3. Check the `approved` field
+4. If `approved: false` → loop back to fix issues:
+   - Code issues → Kimi fixes → Run Codex again
+   - Test issues → GLM-4.7 fixes → Run Codex again
+5. Repeat until `approved: true`
+6. Only then proceed to build verification and PR
+
+**Why this matters:** GPT-5.2 was observed creating PRs before Codex finished, or even when Codex said `approved: false`. This defeats the entire purpose of code review. The PR from this behavior was broken (had type errors that Codex identified).
+
+**Rejection loop flow:**
+```
+Codex returns approved: false
+    ↓
+Read issues array
+    ↓
+Code issues? → Kimi K2.5 fixes → Codex reviews again
+Test issues? → GLM-4.7 fixes → Codex reviews again
+    ↓
+Repeat until approved: true
+    ↓
+Then proceed to Build Verification
+```
+
 ## Iteration Limits
 
 - **Kimi K2.5**: Unlimited iterations for code fixes
