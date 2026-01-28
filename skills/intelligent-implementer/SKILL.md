@@ -813,9 +813,17 @@ cd /path/to/worktree && codex exec "Your prompt as single string"
 **CRITICAL:**
 - **ALWAYS use wrapper scripts** for claude, kimi, and opencode commands
 - **ALWAYS use `timeout=3600`** (60 minutes) for coding agents
+- **DO NOT use `yieldMs` with agent commands** - Let them run to completion or timeout
 - All paths must be ABSOLUTE (e.g., `/Users/jose/ai-worktrees/...`)
 - Wrappers handle argument passing and working directory
 - Codex does NOT need a wrapper (works directly via bash)
+
+**⚠️ EXEC PARAMETERS FOR AGENTS:**
+```
+exec command="..." timeout=3600
+```
+DO NOT ADD: `yieldMs`, `waitFor`, or any parameter that returns control early.
+Let the agent run. Check on it every 3-5 MINUTES (not seconds) using `process poll`.
 
 **⏱️ PATIENCE PROTOCOL WHEN POLLING AGENTS:**
 
