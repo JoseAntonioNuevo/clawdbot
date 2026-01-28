@@ -152,7 +152,7 @@ clawdbot/
 
 ### `skills/intelligent-implementer/SKILL.md`
 
-The orchestrator instructions (~475 lines). Clawdbot reads this and executes autonomously.
+The orchestrator instructions (~1000 lines). Clawdbot reads this and executes autonomously.
 
 **Steps:**
 - Step 0: Create worktree
@@ -160,18 +160,28 @@ The orchestrator instructions (~475 lines). Clawdbot reads this and executes aut
 - Step 2: Kimi K2.5 implementation (code + migrations, no tests)
 - Step 3: GLM-4.7 tests & documentation
 - Step 4: Codex code review
-- Step 5: Create PR + Send notification
+- Step 5: Build verification (lint, test, build)
+- Step 6: Create PR + Send notification
 
-**Critical Rules:**
-- Orchestrator NEVER uses `edit` or `write` tools
-- **Coding agents use wrapper scripts** - Use `lib/run-claude.sh`, `lib/run-kimi.sh`, `lib/run-opencode.sh` for consistent CLI execution
-- Claude Code MUST use WebSearch for 2026 best practices
-- Claude Code queries Supabase MCP for live DB schema (if project uses Supabase)
-- Kimi K2.5 writes code AND migration files (no tests, no docs)
-- Migrations are created but NOT applied (reviewed in PR first)
-- GLM-4.7 writes tests AND documentation
-- PRs are clean (no AI/LLM mentions)
-- Email contains full agent breakdown
+**Critical Rules (enforced in SKILL.md):**
+
+1. **Orchestrator NEVER writes code** - No `edit` or `write` tools
+2. **ALL 4 agents are MANDATORY** - Cannot skip any step:
+   ```
+   Claude Code → Kimi K2.5 → GLM-4.7 → Codex → Build → PR
+   ```
+   Even if tests pass or build succeeds, GLM-4.7 and Codex MUST still run.
+3. **Use wrapper scripts** for coding agents (`lib/run-*.sh`)
+4. **Never kill agents before 60 minutes** - Use `lib/safe-kill.sh`
+5. **Poll every 3-5 minutes**, not seconds
+6. **Check status files**, not stdout (`.<agent>-status.txt`)
+7. Claude Code MUST use WebSearch for 2026 best practices
+8. Claude Code queries Supabase MCP for live DB schema (if applicable)
+9. Kimi K2.5 writes code AND migration files (no tests, no docs)
+10. Migrations are created but NOT applied (reviewed in PR first)
+11. GLM-4.7 writes tests AND documentation
+12. PRs are clean (no AI/LLM mentions)
+13. Email contains full agent breakdown
 
 ## Supabase Integration
 
@@ -306,6 +316,24 @@ The email notification (private to you) contains:
 - Which agent did what
 - Iteration count
 - Research highlights from Claude
+
+## Mandatory Agent Chain
+
+The orchestrator MUST use all 4 agents in order. This is enforced via:
+
+1. **RULE 4 in SKILL.md** - Explicit "YOU MUST USE ALL 4 AGENTS (NO SKIPPING)"
+2. **Checkpoint before PR** - Checklist requiring all status files verified
+3. **Forbidden Actions table** - Skipping GLM-4.7 or Codex is explicitly forbidden
+
+**Why this matters:** GPT-5.2 was observed skipping GLM-4.7 and Codex steps when existing tests passed, going straight to PR creation. The new rules prevent this.
+
+**Verification checkpoint (before PR):**
+```
+□ Claude Code - .claude-status.txt = COMPLETED
+□ Kimi K2.5 - .kimi-status.txt = COMPLETED
+□ GLM-4.7 - .opencode-status.txt = COMPLETED
+□ Codex - returned JSON with "approved": true
+```
 
 ## Iteration Limits
 
