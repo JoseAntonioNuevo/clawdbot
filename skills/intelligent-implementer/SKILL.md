@@ -264,6 +264,16 @@ DO NOT apply database migrations. Only plan them." \
 - Claude Code MUST NOT apply migrations - only plan them
 - Save the plan output as `IMPLEMENTATION_PLAN`
 
+**⏱️ AFTER STARTING CLAUDE - MANDATORY WAITING PROCEDURE:**
+```
+1. Agent started → Record start time
+2. WAIT 5 MINUTES (300 seconds) → DO NOT POLL during this time
+3. After 5 min → Poll ONCE every 3-5 minutes
+4. "No new output" is NORMAL → Keep waiting
+5. At 30 minutes (1800s) → Check git status for file changes
+6. DO NOT use `process kill` until 30+ minutes have passed
+```
+
 ---
 
 ### Step 2: Implementation with Kimi K2.5
@@ -300,64 +310,63 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 - The prompt is passed as a single argument to the wrapper
 - The wrapper handles all quoting requirements
 
-**⏱️ PATIENCE PROTOCOL - CRITICAL - READ CAREFULLY:**
+## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 1800 SECONDS 🚨🚨🚨
 
-Modern LLM coding agents use "thinking mode" which produces NO STDOUT for extended periods.
-This is NORMAL behavior, NOT a failure.
+**THIS IS NON-NEGOTIABLE. VIOLATION = TASK FAILURE.**
 
-**Industry standard timeouts (per Anthropic/AWS best practices):**
-- Anthropic recommends **3600+ seconds (60+ minutes)** for thinking models
-- Complex implementation tasks can take 30-60 minutes of "thinking" with no output
-- Killing early wastes all the thinking work the agent has done
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  BEFORE using `process kill`, you MUST run this check:                  │
+│                                                                         │
+│  ELAPSED=$(ps -p $PID -o etime= | awk -F: '{                           │
+│    if (NF==3) print $1*3600+$2*60+$3;                                  │
+│    else if (NF==2) print $1*60+$2;                                     │
+│    else print $1}')                                                     │
+│                                                                         │
+│  if [ "$ELAPSED" -lt 1800 ]; then                                       │
+│      echo "BLOCKED: Only ${ELAPSED}s elapsed. MINIMUM IS 1800s (30min)" │
+│      # DO NOT KILL - KEEP WAITING                                       │
+│  fi                                                                     │
+│                                                                         │
+│  1800 seconds = 30 minutes = MINIMUM REQUIRED WAIT TIME                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-**MANDATORY RULES:**
+**HARD RULES (no exceptions):**
 
-1. **MINIMUM WAIT TIME: 30 MINUTES (Anthropic recommends 60 min)**
-   - You MUST wait at least 30 minutes before even CONSIDERING a process stuck
-   - For complex tasks, wait up to 60 minutes (Anthropic's recommendation)
-   - "No new output" is NORMAL - agents are THINKING, not failed
-   - DO NOT use `process kill` before 30 minutes have passed
+| Elapsed Time | Action Required |
+|--------------|-----------------|
+| < 60 seconds | DO NOT POLL. Wait. |
+| < 300 seconds (5 min) | Poll ONCE only. Keep waiting. |
+| < 1800 seconds (30 min) | Poll every 3-5 minutes. **NEVER KILL.** |
+| >= 1800 seconds | Check file changes. If no files changed in 20 min, MAY consider kill. |
 
-2. **PROGRESS DETECTION (use this, NOT stdout):**
-   Every 2-3 minutes, check for FILE CHANGES in the worktree:
-   ```bash
-   cd WORKTREE_PATH && git status --short && find . -name "*.ts" -o -name "*.tsx" -mmin -3 2>/dev/null | head -10
-   ```
-   - If files changed in last 3 minutes → Agent is WORKING, keep waiting
-   - If git status shows modifications → Agent is WORKING, keep waiting
-   - Only if NO file changes for 30+ minutes AND process shows no activity → Maybe stuck
+**POLLING FREQUENCY:**
+- First 5 minutes: DO NOT POLL AT ALL (let it start up)
+- 5-30 minutes: Poll every 3-5 minutes MAX (not every few seconds!)
+- After 30 minutes: Poll every 5 minutes, check git status for file changes
 
-3. **WHAT "STUCK" ACTUALLY MEANS:**
-   A process is ONLY stuck if ALL of these are true:
-   - 30+ minutes have passed since start (60 min for complex tasks)
-   - NO file modifications in worktree for 20+ minutes
-   - Process is still running but producing nothing
-   - No error messages in output
+**"NO NEW OUTPUT" MEANS NOTHING:**
+- Agents use "thinking mode" - they produce NO OUTPUT while thinking
+- Thinking can take 30-60 minutes
+- "No new output" after 30 seconds is COMPLETELY NORMAL
+- "No new output" after 5 minutes is COMPLETELY NORMAL
+- "No new output" after 20 minutes is STILL NORMAL
 
-   If ANY file has been modified recently, the agent is WORKING. WAIT.
+**YOU MUST NOT:**
+- Kill after 31 seconds (YOU DID THIS - IT BROKE THE TASK)
+- Kill after 1 minute
+- Kill after 5 minutes
+- Kill after 10 minutes
+- Kill after 20 minutes
+- Kill before 30 minutes (1800 seconds) under ANY circumstances
 
-4. **NEVER KILL BASED ON:**
-   - "No new output" messages - THIS IS NORMAL
-   - Process running for "too long" (under 20 min)
-   - Impatience or wanting to "try something else"
-   - Multiple "Process still running" polls
-
-5. **TRACK START TIME:**
-   When you start an agent, note the time:
-   ```
-   AGENT_START_TIME=$(date +%s)
-   ```
-   Before ANY kill decision, calculate elapsed:
-   ```
-   ELAPSED=$(($(date +%s) - AGENT_START_TIME))
-   if [ $ELAPSED -lt 1800 ]; then echo "Only ${ELAPSED}s elapsed. KEEP WAITING."; fi
-   ```
-   1800 seconds = 30 minutes minimum. For complex tasks, wait 3600 seconds (60 min).
-
-6. **IF TRULY STUCK (after 30+ min with no file changes):**
-   - First, try sending a newline to stdin (might wake it up)
-   - Check if process is actually alive: `ps -p PID`
-   - Only then consider kill + fallback
+**WHAT YOU MUST DO:**
+1. Start the agent
+2. WAIT 5 MINUTES before first poll
+3. Poll every 3-5 minutes
+4. At 30 minutes, check `git status` for file changes
+5. Only if 30+ min passed AND no file changes for 20+ min → consider kill
 
 **If Kimi fails (ONLY after 30+ minutes AND no file changes for 20+ min), try OpenCode with Kimi model:**
 ```bash
@@ -749,14 +758,15 @@ ALWAYS follow this order:
 | Using `write` tool | You are orchestrator, not implementer |
 | Using `web_search` tool | Only Claude Code has WebSearch. Call `claude` via exec instead. |
 | Using `agents_spawn` | Use `exec` to call CLI tools (claude, kimi, opencode, codex) |
-| **Calling coding agents without wrapper scripts** | Claude/Kimi/OpenCode REQUIRE the wrapper scripts in `lib/`. Without them, they hang indefinitely. |
+| **Calling coding agents without wrapper scripts** | Claude/Kimi/OpenCode REQUIRE the wrapper scripts in `lib/`. |
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
 | Ignoring Codex feedback | Quality matters |
-| **Killing agents before 30 min** | Kimi/GLM/Claude need 30-60 min. "No output" = thinking, NOT failure (Anthropic recommends 60 min) |
-| Using `process kill` based on "no output" | NEVER. Use git status to check file changes instead. No output is NORMAL. |
-| Marking session as "failed" without file check | Always check `git status` before declaring failure. Files changed = working. |
-| Killing multiple agents in sequence quickly | If first agent "fails", wait full timeout. Don't rapid-fire kill agents. |
+| **🚨 `process kill` before 1800 seconds (30 min)** | **ABSOLUTELY FORBIDDEN.** You killed after 31 seconds before - THIS BROKE THE TASK. Wait 1800+ seconds MINIMUM. |
+| **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
+| Using `process kill` based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
+| Killing after seeing "Process still running" | **FORBIDDEN.** This message is NORMAL. Keep waiting until 1800+ seconds elapsed. |
+| Marking session as "failed" without 30 min wait | Always wait 1800 seconds minimum. Always check `git status` before declaring failure. |
 | **🚨 EMITTING TEXT DURING MONITORING 🚨** | **CLI DISCONNECTS ON TEXT OUTPUT!** Only use tool calls while agents run. Text only on full completion or permanent failure. |
 
 ## How to Call Agents (IMPORTANT)
