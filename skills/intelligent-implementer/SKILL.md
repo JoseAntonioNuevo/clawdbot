@@ -46,7 +46,43 @@ These rules are NON-NEGOTIABLE. Violating them causes task failure.
 ## RULE 4: POLLING FREQUENCY
 - First 5 minutes: DO NOT poll at all
 - After 5 min: Poll every 3-5 MINUTES (not seconds)
-- Check `git status` for file changes, not stdout
+- Use FILE-BASED output detection (see Rule 5)
+
+## RULE 5: FILE-BASED OUTPUT (CRITICAL)
+Clawdbot's `process poll` does NOT capture stdout properly. Agents write output to FILES.
+
+**Output files (in worktree):**
+| Agent | Output File | Status File |
+|-------|-------------|-------------|
+| Claude | `.claude-output.txt` | `.claude-status.txt` |
+| Kimi | `.kimi-output.txt` | `.kimi-status.txt` |
+| OpenCode | `.opencode-output.txt` | `.opencode-status.txt` |
+
+**Status values:**
+- `RUNNING` = Agent still working
+- `COMPLETED` = Agent finished successfully
+- `ERROR:<code>` = Agent failed with exit code
+
+**HOW TO CHECK AGENT PROGRESS:**
+```bash
+# Check if agent is done (DO NOT use process poll for this):
+cat WORKTREE_PATH/.claude-status.txt
+
+# Get agent output (ONLY after status is COMPLETED or ERROR):
+cat WORKTREE_PATH/.claude-output.txt
+```
+
+**YOU MUST:**
+1. Start the agent with `exec`
+2. Wait 5 minutes before first check
+3. Check status file every 3-5 minutes: `cat .claude-status.txt`
+4. When status = COMPLETED, read the output file
+5. ONLY then proceed to next step
+
+**YOU MUST NOT:**
+- Give up because "process poll shows no output"
+- Do your own analysis instead of waiting for the agent
+- Proceed without reading the agent's output file
 
 ---
 
@@ -287,15 +323,31 @@ DO NOT apply database migrations. Only plan them." \
 - Claude Code MUST NOT apply migrations - only plan them
 - Save the plan output as `IMPLEMENTATION_PLAN`
 
-**⏱️ AFTER STARTING CLAUDE - MANDATORY WAITING PROCEDURE:**
+**⏱️ AFTER STARTING CLAUDE - MANDATORY FILE-BASED MONITORING:**
 ```
 1. Agent started → Record start time
-2. WAIT 5 MINUTES (300 seconds) → DO NOT POLL during this time
-3. After 5 min → Poll ONCE every 3-5 minutes
-4. "No new output" is NORMAL → Keep waiting
-5. At 60 minutes (3600s) → Check git status for file changes
-6. DO NOT use `process kill` until 60+ minutes have passed
+2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
+3. After 5 min → Check STATUS FILE every 3-5 minutes:
+   exec command="cat WORKTREE_PATH/.claude-status.txt" timeout=10
+
+4. STATUS FILE VALUES:
+   - "RUNNING" → Agent still working → Keep waiting
+   - "COMPLETED" → SUCCESS! Read output file
+   - "ERROR:N" → Agent failed with exit code N → Read output for error details
+
+5. When status = COMPLETED, READ THE OUTPUT FILE:
+   exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
+
+6. Save the output as IMPLEMENTATION_PLAN
+
+7. ⚠️ DO NOT:
+   - Give up because "process poll shows no output"
+   - Do your own analysis instead
+   - Proceed without reading .claude-output.txt
 ```
+
+**YOU MUST WAIT FOR STATUS=COMPLETED BEFORE PROCEEDING.**
+If you proceed without reading the output file, the task will fail.
 
 ---
 
@@ -332,6 +384,25 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 - **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 - The prompt is passed as a single argument to the wrapper
 - The wrapper handles all quoting requirements
+
+**⏱️ AFTER STARTING KIMI - MANDATORY FILE-BASED MONITORING:**
+```
+1. Agent started → Record start time
+2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
+3. After 5 min → Check STATUS FILE every 3-5 minutes:
+   exec command="cat WORKTREE_PATH/.kimi-status.txt" timeout=10
+
+4. STATUS FILE VALUES:
+   - "RUNNING" → Agent still working → Keep waiting
+   - "COMPLETED" → SUCCESS! Kimi finished implementation
+   - "ERROR:N" → Agent failed → Check .kimi-output.txt for error
+
+5. When status = COMPLETED:
+   - Check git status for file changes
+   - Proceed to Step 3 (GLM-4.7 for tests)
+
+6. ⚠️ DO NOT give up and do your own implementation!
+```
 
 ## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 3600 SECONDS (1 HOUR) 🚨🚨🚨
 
@@ -444,13 +515,26 @@ Focus on edge cases and error handling in tests."
 **IMPORTANT:**
 - **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 
-**⏱️ PATIENCE - WAIT FOR GLM-4.7:**
-- GLM-4.7 may take several minutes to generate comprehensive tests
-- **WAIT AT LEAST 60 MINUTES (1 HOUR)** before considering it stuck
-- Use FILE-BASED progress detection (git status), NOT stdout
-- Only fallback if: explicit error OR 30+ minutes with zero file changes for 20+ min
+**⏱️ AFTER STARTING GLM-4.7 - MANDATORY FILE-BASED MONITORING:**
+```
+1. Agent started → Record start time
+2. WAIT 5 MINUTES (300 seconds) → DO NOT CHECK during this time
+3. After 5 min → Check STATUS FILE every 3-5 minutes:
+   exec command="cat WORKTREE_PATH/.opencode-status.txt" timeout=10
 
-**If GLM-4.7 fails (ONLY after 30+ minutes AND no file changes for 20+ min), fallback to Claude Code:**
+4. STATUS FILE VALUES:
+   - "RUNNING" → Agent still working → Keep waiting
+   - "COMPLETED" → SUCCESS! GLM finished tests/docs
+   - "ERROR:N" → Agent failed → Check .opencode-output.txt for error
+
+5. When status = COMPLETED:
+   - Check git status for file changes (tests should exist)
+   - Proceed to Step 4 (Codex code review)
+
+6. ⚠️ DO NOT give up and write your own tests!
+```
+
+**If GLM-4.7 fails (status = ERROR), fallback to Claude Code:**
 ```bash
 /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
   "WORKTREE_PATH" \

@@ -207,23 +207,36 @@ worktree.sh list --project PATH
 send-resend-email.sh --to EMAIL --subject "Subject" --body "Body"
 ```
 
-**`lib/run-claude.sh`** - Claude CLI wrapper:
+**`lib/run-claude.sh`** - Claude CLI wrapper with file-based output:
 ```bash
 run-claude.sh <working-dir> <prompt> [allowed-tools]
 # Example:
 run-claude.sh /path/to/worktree "Analyze this codebase" "Bash,Read,Glob,Grep,WebSearch"
+# Output: .claude-output.txt, .claude-status.txt
 ```
 
-**`lib/run-kimi.sh`** - Kimi CLI wrapper:
+**`lib/run-kimi.sh`** - Kimi CLI wrapper with file-based output:
 ```bash
 run-kimi.sh <working-dir> <prompt>
+# Output: .kimi-output.txt, .kimi-status.txt
 ```
 
-**`lib/run-opencode.sh`** - OpenCode CLI wrapper:
+**`lib/run-opencode.sh`** - OpenCode CLI wrapper with file-based output:
 ```bash
 run-opencode.sh <working-dir> <model> <prompt>
 # Example:
 run-opencode.sh /path/to/worktree "zai-coding-plan/glm-4.7" "Write tests"
+# Output: .opencode-output.txt, .opencode-status.txt
+```
+
+**File-based output system:**
+Clawdbot's `exec` tool doesn't capture stdout properly from background processes. The wrappers now write output to files:
+- Status file (`.<agent>-status.txt`): Contains `RUNNING`, `COMPLETED`, or `ERROR:<code>`
+- Output file (`.<agent>-output.txt`): Contains the agent's full output
+
+To check if an agent is done:
+```bash
+cat /path/to/worktree/.claude-status.txt  # Returns: RUNNING, COMPLETED, or ERROR:N
 ```
 
 **`lib/safe-kill.sh`** - Prevents premature agent kills:
@@ -237,7 +250,9 @@ safe-kill.sh 12345 3600   # Explicit: 1 hour minimum
 GPT-5.2 tends to kill agents prematurely (after seconds instead of waiting). This wrapper enforces the minimum wait time at the system level - it will BLOCK kill attempts before the minimum time (default: 1 hour) has elapsed.
 
 **Why wrappers are used:**
-The wrappers ensure consistent argument passing and working directory handling. CLIs work fine in their non-interactive modes (`-p`, `--print`). The safe-kill wrapper prevents the orchestrator from killing agents before they've had time to complete their work.
+1. File-based output capture (clawdbot's exec doesn't capture stdout properly)
+2. Consistent argument passing and working directory handling
+3. safe-kill wrapper prevents premature agent kills
 
 ## Environment Variables
 
