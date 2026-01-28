@@ -313,9 +313,12 @@ PRs and commits are **clean** - no mentions of:
 - Co-Authored-By AI
 
 The email notification (private to you) contains:
-- Which agent did what
+- Which agents ACTUALLY ran (verified via status files)
+- ⚠️ markers for any skipped agents
 - Iteration count
 - Research highlights from Claude
+
+**Honest Reporting:** Email only lists agents that ran. If GPT-5.2 skips an agent, it must be marked as `⚠️ SKIPPED` in the email rather than falsely claiming it ran.
 
 ## Mandatory Agent Chain
 
@@ -334,6 +337,16 @@ The orchestrator MUST use all 4 agents in order. This is enforced via:
 □ GLM-4.7 - .opencode-status.txt = COMPLETED
 □ Codex - returned JSON with "approved": true
 ```
+
+**Verification command (orchestrator must run this):**
+```bash
+cd WORKTREE && echo "=== Agent Status ===" && \
+  echo -n "Claude: "; cat .claude-status.txt 2>/dev/null || echo "NOT RUN"; \
+  echo -n "Kimi: "; cat .kimi-status.txt 2>/dev/null || echo "NOT RUN"; \
+  echo -n "GLM-4.7: "; cat .opencode-status.txt 2>/dev/null || echo "NOT RUN"
+```
+
+If ANY shows "NOT RUN" → orchestrator must go back and run the missing agent.
 
 ## Iteration Limits
 
