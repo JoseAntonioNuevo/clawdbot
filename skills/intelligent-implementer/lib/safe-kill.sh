@@ -19,7 +19,7 @@
 set -e
 
 PID="$1"
-MIN_SECONDS="${2:-1800}"  # Default: 30 minutes
+MIN_SECONDS="${2:-3600}"  # Default: 60 minutes (1 hour)
 
 if [[ -z "$PID" ]]; then
     echo "ERROR: No PID provided" >&2

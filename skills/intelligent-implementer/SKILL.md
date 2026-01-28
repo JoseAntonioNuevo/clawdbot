@@ -31,10 +31,10 @@ These rules are NON-NEGOTIABLE. Violating them causes task failure.
 - You are the ORCHESTRATOR, not the implementer
 - Call other agents to write code
 
-## RULE 2: YOU CANNOT KILL AGENTS BEFORE 30 MINUTES
+## RULE 2: YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)
 - NEVER use `process kill` directly
-- ALWAYS use the safe-kill wrapper: `/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800`
-- The wrapper will BLOCK kills before 1800 seconds (30 minutes)
+- ALWAYS use the safe-kill wrapper: `/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600`
+- The wrapper will BLOCK kills before 3600 seconds (60 minutes / 1 hour)
 - "No output" is NORMAL - agents are thinking, not stuck
 
 ## RULE 3: YOU CANNOT OUTPUT TEXT WHILE WORKING
@@ -57,9 +57,9 @@ Before attempting to terminate ANY agent, you MUST answer these questions:
 ```
 CHECKPOINT QUESTIONS:
 1. How many seconds has the agent been running? ___
-2. Is this number >= 1800 (30 minutes)? YES / NO
+2. Is this number >= 3600 (60 minutes / 1 hour)? YES / NO
 3. Have I checked git status for file changes? YES / NO
-4. Did git status show zero changes for 20+ minutes? YES / NO
+4. Did git status show zero changes for 30+ minutes? YES / NO
 
 If ANY answer is NO → DO NOT KILL. Keep waiting.
 If ALL answers are YES → Use safe-kill.sh (NOT process kill)
@@ -74,7 +74,7 @@ If ALL answers are YES → Use safe-kill.sh (NOT process kill)
 | Use `exec` to call agents | ✅ YES |
 | Use `process poll` to check status | ✅ YES (every 3-5 min) |
 | Use `process kill` directly | ❌ NO - Use safe-kill.sh |
-| Kill agent before 30 min | ❌ NO - Wrapper will block |
+| Kill agent before 60 min | ❌ NO - Wrapper will block |
 | Use `edit` or `write` | ❌ NO - You don't write code |
 | Output text while monitoring | ❌ NO - CLI disconnects |
 
@@ -293,8 +293,8 @@ DO NOT apply database migrations. Only plan them." \
 2. WAIT 5 MINUTES (300 seconds) → DO NOT POLL during this time
 3. After 5 min → Poll ONCE every 3-5 minutes
 4. "No new output" is NORMAL → Keep waiting
-5. At 30 minutes (1800s) → Check git status for file changes
-6. DO NOT use `process kill` until 30+ minutes have passed
+5. At 60 minutes (3600s) → Check git status for file changes
+6. DO NOT use `process kill` until 60+ minutes have passed
 ```
 
 ---
@@ -333,7 +333,7 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 - The prompt is passed as a single argument to the wrapper
 - The wrapper handles all quoting requirements
 
-## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 1800 SECONDS 🚨🚨🚨
+## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 3600 SECONDS (1 HOUR) 🚨🚨🚨
 
 **THIS IS NON-NEGOTIABLE. VIOLATION = TASK FAILURE.**
 
@@ -346,12 +346,12 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 │    else if (NF==2) print $1*60+$2;                                     │
 │    else print $1}')                                                     │
 │                                                                         │
-│  if [ "$ELAPSED" -lt 1800 ]; then                                       │
-│      echo "BLOCKED: Only ${ELAPSED}s elapsed. MINIMUM IS 1800s (30min)" │
+│  if [ "$ELAPSED" -lt 3600 ]; then                                       │
+│      echo "BLOCKED: Only ${ELAPSED}s elapsed. MINIMUM IS 3600s (1hour)" │
 │      # DO NOT KILL - KEEP WAITING                                       │
 │  fi                                                                     │
 │                                                                         │
-│  1800 seconds = 30 minutes = MINIMUM REQUIRED WAIT TIME                 │
+│  3600 seconds = 60 minutes = 1 HOUR = MINIMUM REQUIRED WAIT TIME        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -361,13 +361,13 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 |--------------|-----------------|
 | < 60 seconds | DO NOT POLL. Wait. |
 | < 300 seconds (5 min) | Poll ONCE only. Keep waiting. |
-| < 1800 seconds (30 min) | Poll every 3-5 minutes. **NEVER KILL.** |
-| >= 1800 seconds | Check file changes. If no files changed in 20 min, MAY consider kill. |
+| < 3600 seconds (60 min) | Poll every 3-5 minutes. **NEVER KILL.** |
+| >= 3600 seconds | Check file changes. If no files changed in 30 min, MAY consider kill. |
 
 **POLLING FREQUENCY:**
 - First 5 minutes: DO NOT POLL AT ALL (let it start up)
-- 5-30 minutes: Poll every 3-5 minutes MAX (not every few seconds!)
-- After 30 minutes: Poll every 5 minutes, check git status for file changes
+- 5-60 minutes: Poll every 3-5 minutes MAX (not every few seconds!)
+- After 60 minutes: Poll every 5 minutes, check git status for file changes
 
 **"NO NEW OUTPUT" MEANS NOTHING:**
 - Agents use "thinking mode" - they produce NO OUTPUT while thinking
@@ -382,14 +382,14 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 - Kill after 5 minutes
 - Kill after 10 minutes
 - Kill after 20 minutes
-- Kill before 30 minutes (1800 seconds) under ANY circumstances
+- Kill before 60 minutes (3600 seconds) under ANY circumstances
 
 **WHAT YOU MUST DO:**
 1. Start the agent
 2. WAIT 5 MINUTES before first poll
 3. Poll every 3-5 minutes
-4. At 30 minutes, check `git status` for file changes
-5. Only if 30+ min passed AND no file changes for 20+ min → consider kill
+4. At 60 minutes, check `git status` for file changes
+5. Only if 60+ min passed AND no file changes for 30+ min → consider kill
 
 **If Kimi fails (ONLY after 30+ minutes AND no file changes for 20+ min), try OpenCode with Kimi model:**
 ```bash
@@ -446,7 +446,7 @@ Focus on edge cases and error handling in tests."
 
 **⏱️ PATIENCE - WAIT FOR GLM-4.7:**
 - GLM-4.7 may take several minutes to generate comprehensive tests
-- **WAIT AT LEAST 30 MINUTES** before considering it stuck
+- **WAIT AT LEAST 60 MINUTES (1 HOUR)** before considering it stuck
 - Use FILE-BASED progress detection (git status), NOT stdout
 - Only fallback if: explicit error OR 30+ minutes with zero file changes for 20+ min
 
@@ -677,9 +677,9 @@ EOF
 7. **Internet research is MANDATORY** - Claude must use WebSearch (not you)
 8. **Follow the plan** - Kimi must implement exactly what Claude planned
 9. **⏱️ PATIENCE PROTOCOL** - NEVER KILL AGENTS PREMATURELY:
-   - Kimi K2.5: Wait **30 MINUTES minimum** (60 min for complex tasks)
-   - GLM-4.7: Wait **30 MINUTES minimum**
-   - Claude Code: Wait **30 MINUTES minimum**
+   - Kimi K2.5: Wait **60 MINUTES minimum** (1 hour)
+   - GLM-4.7: Wait **60 MINUTES minimum** (1 hour)
+   - Claude Code: Wait **60 MINUTES minimum** (1 hour)
    - "No new output" means THINKING, not failure - THIS IS NORMAL
    - Use FILE-BASED progress detection: `git status` and `find -mmin`
    - ONLY kill if: 30+ min passed AND no file changes for 20+ min AND no errors
@@ -785,11 +785,11 @@ ALWAYS follow this order:
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
 | Ignoring Codex feedback | Quality matters |
-| **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 1800` instead. It blocks premature kills. |
+| **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 3600` instead. It blocks premature kills. |
 | **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
 | Killing based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
 | Killing after seeing "Process still running" | **FORBIDDEN.** This message is NORMAL. Use safe-kill.sh which will block premature kills. |
-| Marking session as "failed" without 30 min wait | Always wait 1800 seconds minimum. Always check `git status` before declaring failure. |
+| Marking session as "failed" without 60 min wait | Always wait 3600 seconds (1 hour) minimum. Always check `git status` before declaring failure. |
 | **🚨 EMITTING TEXT DURING MONITORING 🚨** | **CLI DISCONNECTS ON TEXT OUTPUT!** Only use tool calls while agents run. Text only on full completion or permanent failure. |
 
 ## How to Call Agents (IMPORTANT)
@@ -859,23 +859,23 @@ Let the agent run. Check on it every 3-5 MINUTES (not seconds) using `process po
    If ANY files modified → Agent is WORKING → Keep waiting
 
 4. **MINIMUM WAIT TIMES (Anthropic recommends 60 min):**
-   - Kimi/OpenCode: **30 MINUTES minimum** (60 for complex tasks)
-   - GLM-4.7: **30 MINUTES minimum**
-   - Claude Code: **30 MINUTES minimum**
+   - Kimi/OpenCode: **60 MINUTES minimum** (1 hour)
+   - GLM-4.7: **60 MINUTES minimum** (1 hour)
+   - Claude Code: **60 MINUTES minimum** (1 hour)
 
 5. **TO KILL AN AGENT, USE THE SAFE-KILL WRAPPER:**
    ```bash
    # Get the PID from the exec response, then:
-   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800
+   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600
    ```
-   - The wrapper will BLOCK the kill if < 1800 seconds elapsed
-   - The wrapper will APPROVE the kill if >= 1800 seconds elapsed
+   - The wrapper will BLOCK the kill if < 3600 seconds (1 hour) elapsed
+   - The wrapper will APPROVE the kill if >= 3600 seconds (1 hour) elapsed
    - NEVER use `process kill` directly - it bypasses the time check
 
 6. **Track elapsed time:**
    ```bash
    # Note start time when launching agent
-   # Before ANY kill decision, verify 30+ minutes elapsed (1800 seconds)
+   # Before ANY kill decision, verify 60+ minutes elapsed (3600 seconds)
    # Or just use safe-kill.sh which does this automatically
    ```
 
@@ -889,9 +889,9 @@ Before you finish reading this document, remember:
 
 1. **YOU CANNOT WRITE CODE** - No `edit`, no `write`. Call agents instead.
 
-2. **YOU CANNOT KILL AGENTS BEFORE 30 MINUTES** - Use safe-kill.sh, not `process kill`:
+2. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
    ```bash
-   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 1800
+   /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600
    ```
 
 3. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
