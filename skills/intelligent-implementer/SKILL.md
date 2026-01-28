@@ -47,42 +47,38 @@ YOU (GPT-5.2 Orchestrator) - Coordinates everything
   │ STEP 0: Create worktree
   │
   ├─→ STEP 1: Claude Code (Opus 4.5) - RESEARCH & PLANNING
-  │     • Search internet for best practices 2026
   │     • Analyze the codebase
+  │     • Search internet for best practices 2026
   │     • Read CLAUDE.md for project context
   │     • Generate detailed implementation plan
   │
-  ├─→ STEP 2: Kimi K2.5 - IMPLEMENTATION (code only)
+  ├─→ STEP 2: Kimi K2.5 - IMPLEMENTATION (CODE ONLY)
   │     • Receive the plan from Claude
-  │     • Implement following the plan exactly
-  │     • ONLY write implementation code
-  │     • NO tests, NO documentation (GLM will do that)
+  │     • Implement code following the plan exactly
+  │     • Create migrations if needed
   │
-  ├─→ STEP 3: GLM-4.7 via OpenCode - TESTS & DOCS
-  │     • Analyze the implementation from Kimi
-  │     • Generate comprehensive unit tests
-  │     • Generate integration tests if needed
-  │     • Generate/update documentation (JSDoc, docstrings, README sections)
-  │     • 100% test coverage goal
+  ├─→ STEP 3: GLM-4.7 - TESTS & DOCUMENTATION
+  │     • Write unit tests for the implementation
+  │     • Add JSDoc/docstrings
   │
   ├─→ STEP 4: Codex - CODE REVIEW
   │     • Review implementation + tests against the plan
   │     • Verify test coverage
   │     • Approve or reject with feedback
   │
-  └─→ STEP 5: PR + Notification
+  ├─→ STEP 5: Build Verification (lint, test, build)
+  │
+  └─→ STEP 6: PR + Notification
 ```
 
-### Cost Optimization
+### Agent Roles
 
-| Agent | Task | Cost |
-|-------|------|------|
-| Claude Code (Opus 4.5) | Research & Planning | Paid |
-| Kimi K2.5 | Implementation (code only) | Paid |
-| **GLM-4.7** | **Tests + Documentation** |  |
-| Codex | Code Review | Paid |
-
-By using GLM-4.7 for tests and docs, you save Kimi tokens while getting excellent coverage (GLM-4.7: 84.9% LiveCodeBench).
+| Agent | Task |
+|-------|------|
+| Claude Code (Opus 4.5) | Research & Planning |
+| Kimi K2.5 | Implementation (code only) |
+| GLM-4.7 | Tests & Documentation |
+| Codex | Code Review |
 
 ---
 
@@ -142,11 +138,10 @@ Save the returned `WORKTREE_PATH`.
 **THIS IS THE MOST IMPORTANT STEP.**
 
 Claude Code (Opus 4.5) will:
-1. Search the internet for best practices and modern techniques (2026)
-2. Analyze the project codebase
-3. Read CLAUDE.md for project-specific context
-4. **If project uses Supabase**: Query database schema via MCP
-5. Generate a detailed implementation plan
+1. **FIRST**: Understand the task and analyze existing code
+2. **THEN**: Search internet for best practices WITH that context
+3. **THEN**: Query Supabase schema if applicable
+4. **FINALLY**: Generate detailed implementation plan
 
 **Command:**
 ```bash
@@ -156,22 +151,27 @@ You are a senior software architect preparing an implementation plan.
 ## TASK
 [Insert the user's task description here]
 
-## YOUR MISSION
+## YOUR MISSION (FOLLOW THIS ORDER)
 
-### Phase 1: Research (MANDATORY)
-Search the internet for:
-- Best practices for this type of implementation in 2026
-- Modern patterns and techniques
+### Phase 1: Understand the Task & Analyze Codebase (DO THIS FIRST)
+Before searching the internet, you MUST understand what we have:
+- Read CLAUDE.md if it exists for project context and conventions
+- Identify all files related to the task
+- Understand the existing architecture and patterns
+- Note what technologies/libraries are already in use
+- Find related tests
+
+This gives you CONTEXT for the internet search.
+
+### Phase 2: Research Best Practices (WITH CONTEXT)
+NOW that you understand the codebase, search the internet for:
+- Best practices for this specific type of implementation in 2026
+- Modern patterns that work with the existing stack
 - Common pitfalls to avoid
 - Security considerations
 
-Use WebSearch to find current information. Do NOT rely on outdated knowledge.
-
-### Phase 2: Codebase Analysis
-- Read CLAUDE.md if it exists for project context
-- Identify all files that need to be modified
-- Understand the existing architecture and patterns
-- Find related tests that need updating
+Use WebSearch with SPECIFIC queries based on what you found in Phase 1.
+Example: If you found they use Deepgram + React, search "Deepgram WebSocket React best practices 2026"
 
 ### Phase 3: Database Schema (IF SUPABASE PROJECT)
 If the project uses Supabase (check package.json or .env for supabase):
@@ -185,10 +185,10 @@ If the project uses Supabase (check package.json or .env for supabase):
 
 IMPORTANT: Do NOT apply migrations. Only plan them. Migrations will be reviewed in PR.
 
-### Phase 4: Implementation Plan
-Create a detailed plan with:
+### Phase 4: Create Implementation Plan
+Combine your codebase analysis + research findings to create a detailed plan:
 1. Files to modify (with exact paths)
-2. Changes needed in each file
+2. Changes needed in each file (specific, not vague)
 3. New files to create (if any)
 4. **Database migrations needed** (if Supabase project)
 5. Tests to add or update
@@ -247,85 +247,160 @@ EOF
 
 ---
 
-### Step 2: Implementation with Kimi K2.5 (CODE + MIGRATIONS - NO TESTS)
+### Step 2: Implementation with Kimi K2.5
 
-Pass the plan from Claude to Kimi K2.5 for implementation.
+Pass the plan from Claude to Kimi K2.5 for **code implementation only**.
 
-**IMPORTANT:**
-- Kimi implements code ONLY, NOT tests (GLM-4.7 will generate tests)
-- If plan includes database migrations, Kimi creates the SQL files but does NOT run them
-- Migrations go in `supabase/migrations/YYYYMMDDHHMMSS_description.sql`
+**Kimi will:**
+- Implement all code changes from the plan
+- Create database migrations if needed (in `supabase/migrations/`)
+- **NO tests** - GLM-4.7 will handle that
+- **NO documentation** - GLM-4.7 will handle that
 
 **Command:**
 ```bash
-kimi --print --work-dir WORKTREE_PATH -p "TASK: [original task]. IMPLEMENTATION PLAN FROM CLAUDE: [paste the plan here]. Follow this plan exactly. Read CLAUDE.md first if it exists. Implement ONLY the code changes - DO NOT write tests. Tests will be generated separately. If the plan includes DATABASE MIGRATIONS: Create the migration SQL files in supabase/migrations/ with timestamp filenames (YYYYMMDDHHMMSS_description.sql). DO NOT run the migrations - only create the files. They will be applied after PR review."
+kimi --print -w WORKTREE_PATH -p "TASK: [original task]
+
+IMPLEMENTATION PLAN FROM CLAUDE:
+[paste the full plan here]
+
+YOUR MISSION:
+1. Read CLAUDE.md first for project conventions
+2. Implement ALL code changes from the plan
+3. If plan includes DATABASE MIGRATIONS: Create SQL files in supabase/migrations/ with timestamp filenames. DO NOT run them.
+4. Follow existing patterns in the codebase
+
+DO NOT write tests or documentation - another agent will do that.
+IMPORTANT: Do NOT run database migrations. Only create the files."
 ```
 
-**IMPORTANT:**
-- The `-p` flag must come AFTER `--work-dir`
-- Prompt must be a single line without leading newlines
-- Include the full plan from Claude
-- Explicitly tell Kimi NOT to write tests
-
-**If Kimi fails, try OpenCode with Kimi model:**
+**CRITICAL COMMAND FORMAT:**
 ```bash
-cd WORKTREE_PATH && opencode run -m "kimi-k2" "TASK: [task]. PLAN: [plan]. Implement code only, NO tests."
+kimi --print -w /full/path/to/worktree -p "Your prompt here as a single string"
 ```
 
-**If both fail, escalate to Claude Code for implementation:**
+**Rules:**
+- `-w` MUST come before `-p`
+- The prompt MUST be in quotes as a single string
+- Do NOT split the prompt across multiple arguments
+- Do NOT use heredocs or multiline - keep it simple
+
+**⏱️ PATIENCE PROTOCOL - CRITICAL - READ CAREFULLY:**
+
+Modern LLM coding agents use "thinking mode" which produces NO STDOUT for extended periods.
+This is NORMAL behavior, NOT a failure.
+
+**Industry standard timeouts (per Anthropic/AWS best practices):**
+- Anthropic recommends **3600+ seconds (60+ minutes)** for thinking models
+- Complex implementation tasks can take 30-60 minutes of "thinking" with no output
+- Killing early wastes all the thinking work the agent has done
+
+**MANDATORY RULES:**
+
+1. **MINIMUM WAIT TIME: 30 MINUTES (Anthropic recommends 60 min)**
+   - You MUST wait at least 30 minutes before even CONSIDERING a process stuck
+   - For complex tasks, wait up to 60 minutes (Anthropic's recommendation)
+   - "No new output" is NORMAL - agents are THINKING, not failed
+   - DO NOT use `process kill` before 30 minutes have passed
+
+2. **PROGRESS DETECTION (use this, NOT stdout):**
+   Every 2-3 minutes, check for FILE CHANGES in the worktree:
+   ```bash
+   cd WORKTREE_PATH && git status --short && find . -name "*.ts" -o -name "*.tsx" -mmin -3 2>/dev/null | head -10
+   ```
+   - If files changed in last 3 minutes → Agent is WORKING, keep waiting
+   - If git status shows modifications → Agent is WORKING, keep waiting
+   - Only if NO file changes for 30+ minutes AND process shows no activity → Maybe stuck
+
+3. **WHAT "STUCK" ACTUALLY MEANS:**
+   A process is ONLY stuck if ALL of these are true:
+   - 30+ minutes have passed since start (60 min for complex tasks)
+   - NO file modifications in worktree for 20+ minutes
+   - Process is still running but producing nothing
+   - No error messages in output
+
+   If ANY file has been modified recently, the agent is WORKING. WAIT.
+
+4. **NEVER KILL BASED ON:**
+   - "No new output" messages - THIS IS NORMAL
+   - Process running for "too long" (under 20 min)
+   - Impatience or wanting to "try something else"
+   - Multiple "Process still running" polls
+
+5. **TRACK START TIME:**
+   When you start an agent, note the time:
+   ```
+   AGENT_START_TIME=$(date +%s)
+   ```
+   Before ANY kill decision, calculate elapsed:
+   ```
+   ELAPSED=$(($(date +%s) - AGENT_START_TIME))
+   if [ $ELAPSED -lt 1800 ]; then echo "Only ${ELAPSED}s elapsed. KEEP WAITING."; fi
+   ```
+   1800 seconds = 30 minutes minimum. For complex tasks, wait 3600 seconds (60 min).
+
+6. **IF TRULY STUCK (after 30+ min with no file changes):**
+   - First, try sending a newline to stdin (might wake it up)
+   - Check if process is actually alive: `ps -p PID`
+   - Only then consider kill + fallback
+
+**If Kimi fails (ONLY after 30+ minutes AND no file changes for 20+ min), try OpenCode with Kimi model:**
 ```bash
-cd WORKTREE_PATH && claude -p "TASK: [task]. PLAN: [plan]. Implement code only, no tests." --allowedTools "Bash,Read,Write,Edit"
+cd WORKTREE_PATH && opencode run -m "kimi-for-coding/kimi-k2-thinking" "Your prompt here"
+```
+
+**If both fail, escalate to Claude Code:**
+```bash
+cd WORKTREE_PATH && claude -p "TASK: [task]. PLAN: [plan]. Implement the code only." --allowedTools "Bash,Read,Write,Edit"
 ```
 
 ---
 
-### Step 3: Tests & Documentation with GLM-4.7 via OpenCode 
-After implementation, use GLM-4.7 to generate tests AND documentation.
+### Step 3: Tests & Documentation with GLM-4.7
 
-**Why GLM-4.7 for tests & docs:**
-- 84.9% on LiveCodeBench (excellent for test generation)
-- Saves Kimi K2.5 tokens for pure implementation
+After Kimi implements the code, call GLM-4.7 to write tests and documentation.
+
+**GLM-4.7 will:**
+- Write unit tests for all new/modified functions
+- Add JSDoc/docstrings to new functions
+- Update README if needed
 
 **Command:**
 ```bash
-cd WORKTREE_PATH && opencode run -m "glm-4.7" "TASK: Generate tests and documentation for the recent implementation.
+cd WORKTREE_PATH && opencode run -m "zai-coding-plan/glm-4.7" "TASK: Write tests and documentation for the following implementation.
 
-IMPLEMENTATION PLAN:
-[paste the plan from Claude]
+ORIGINAL TASK: [task]
 
-IMPLEMENTATION DIFF:
-$(git diff BASE_BRANCH...HEAD)
+IMPLEMENTATION PLAN: [plan from Claude]
+
+DIFF OF CHANGES: $(git diff BASE_BRANCH...HEAD)
 
 YOUR MISSION:
+1. Read CLAUDE.md first for project conventions
+2. Write unit tests for ALL new/modified functions
+3. Add JSDoc/docstrings to new public functions
+4. Update README if significant changes were made
+5. Follow existing test patterns in the codebase
 
-## Tests
-1. Analyze the code changes
-2. Generate unit tests for all new/modified functions
-3. Generate integration tests if applicable
-4. Aim for 100% test coverage of new code
-5. Follow existing test patterns in the project
-
-## Documentation
-1. Add JSDoc/docstrings to all new functions
-2. Update README if new features were added
-3. Add inline comments for complex logic
-4. Update any existing docs affected by changes
-
-Read CLAUDE.md for project conventions.
-
-OUTPUT: Create/update test files AND documentation."
+Focus on edge cases and error handling in tests."
 ```
 
-**If GLM-4.7 fails, try Kimi as backup:**
+**⏱️ PATIENCE - WAIT FOR GLM-4.7:**
+- GLM-4.7 may take several minutes to generate comprehensive tests
+- **WAIT AT LEAST 30 MINUTES** before considering it stuck
+- Use FILE-BASED progress detection (git status), NOT stdout
+- Only fallback if: explicit error OR 30+ minutes with zero file changes for 20+ min
+
+**If GLM-4.7 fails (ONLY after 30+ minutes AND no file changes for 20+ min), fallback to Claude Code:**
 ```bash
-kimi --print --work-dir WORKTREE_PATH -p "Generate tests and documentation for the implementation. Plan: [plan]. Focus on 100% coverage and clear docs."
+cd WORKTREE_PATH && claude -p "Write tests and documentation for the implementation. PLAN: [plan]" --allowedTools "Bash,Read,Write,Edit"
 ```
 
 ---
 
 ### Step 4: Code Review with Codex
 
-After implementation AND test generation, review everything with Codex.
+After Kimi's implementation AND GLM's tests/docs, review everything with Codex.
 
 **Command:**
 ```bash
@@ -356,21 +431,61 @@ Respond in JSON:
 ```
 
 **Evaluation:**
-- If `approved: true` → Go to Step 5
+- If `approved: true` → Go to Step 5 (Build Verification)
 - If `approved: false` with code issues → Loop back to Step 2 (Kimi)
-- If `approved: false` with test issues → Loop back to Step 3 (GLM)
+- If `approved: false` with test/doc issues → Loop back to Step 3 (GLM-4.7)
 - If stuck (same issues 5 times) → Report failure
 
 ---
 
-### Step 5: Create PR
+### Step 5: Build Verification (MANDATORY)
 
-**1. Run tests:**
+**Before creating a PR, ALL builds must pass. This is NOT optional.**
+
+**1. Detect package manager and run verification:**
 ```bash
-cd WORKTREE_PATH && npm test  # or pytest, go test, etc.
+cd WORKTREE_PATH
+
+# Detect package manager (pnpm > yarn > npm)
+if [[ -f "pnpm-lock.yaml" ]]; then
+  PKG_MGR="pnpm"
+elif [[ -f "yarn.lock" ]]; then
+  PKG_MGR="yarn"
+else
+  PKG_MGR="npm"
+fi
+
+# Run lint
+$PKG_MGR lint
+
+# Run tests
+$PKG_MGR test
+
+# Run build
+$PKG_MGR run build
 ```
 
-**2. Commit changes:**
+**2. If ANY check fails:**
+- DO NOT create PR
+- Analyze the error:
+  - **Lint fails** → Loop back to Step 2 (Kimi) - code issue
+  - **Build fails** → Loop back to Step 2 (Kimi) - code issue
+  - **Tests fail** → Loop back to Step 3 (GLM-4.7) - test issue
+- Include the FULL error message in your prompt
+- Example: "The tests failed with this error: [error]. Fix the tests."
+
+**3. Repeat until ALL checks pass:**
+- Lint must pass (no errors)
+- Tests must pass (all green)
+- Build must compile successfully
+
+Only proceed to Step 6 when all three pass.
+
+---
+
+### Step 6: Create PR
+
+**1. Commit changes:**
 ```bash
 cd WORKTREE_PATH && git add -A && git commit -m "$(cat <<'EOF'
 [YOU generate a clean, professional commit message based on changes]
@@ -380,7 +495,7 @@ EOF
 )"
 ```
 
-**3. Push and create PR:**
+**2. Push and create PR:**
 ```bash
 git push -u origin BRANCH_NAME
 
@@ -401,7 +516,9 @@ EOF
 
 ---
 
-### Step 5: Notification
+### Step 7: Notification (MANDATORY - DO NOT SKIP)
+
+**YOU MUST send a notification email after creating the PR. This is NOT optional.**
 
 ```bash
 /Users/jose/clawd/skills/intelligent-implementer/lib/send-resend-email.sh \
@@ -433,14 +550,79 @@ EOF
 
 ---
 
+### Step 8: FAILURE NOTIFICATION (MANDATORY IF TASK FAILS)
+
+**If the task fails at ANY point, you MUST send a failure notification email. This is NOT optional.**
+
+Failure can happen due to:
+- Agent timeouts (after waiting 30-60 min with no file changes)
+- Build/lint/test failures that cannot be fixed after multiple attempts
+- Errors that prevent completion
+- Any reason the PR cannot be created
+
+**Send failure email:**
+```bash
+/Users/jose/clawd/skills/intelligent-implementer/lib/send-resend-email.sh \
+  --to "$NOTIFY_EMAIL_TO" \
+  --subject "❌ Clawdbot FAILED: [descriptive title]" \
+  --body "$(cat <<'EOF'
+🦞 CLAWDBOT TASK FAILED
+
+Task: [task]
+Project: [project]
+Worktree: [worktree path]
+Branch: [branch name]
+
+## What Failed
+[Describe exactly what failed and at which step]
+
+## Error Details
+[Include the actual error message or reason for failure]
+
+## What Was Completed
+[List any partial progress made before failure]
+
+## Possible Causes
+[Your analysis of why it failed]
+
+## Suggested Next Steps
+[What the user could try to fix it or continue manually]
+
+## Agents Used Before Failure
+- [List which agents were called and their outcomes]
+
+Note: The worktree still exists at [path] with partial changes.
+EOF
+)"
+```
+
+**IMPORTANT:**
+- ALWAYS send this email if you cannot complete the task
+- NEVER exit silently without notification
+- Include enough detail for the user to understand what happened
+- The worktree path is critical so user can continue manually if needed
+
+---
+
 ## Critical Rules
 
 1. **YOU ARE THE ORCHESTRATOR** - You coordinate, you don't implement
-2. **NEVER use `edit` or `write`** - Always call external agents
-3. **Claude Code FIRST** - Always research and plan before implementing
-4. **Internet research is MANDATORY** - Claude must use WebSearch
-5. **Follow the plan** - Kimi must implement exactly what Claude planned
-6. **Be patient** - Agents may take time. Wait for them.
+2. **BUILD MUST PASS** - ALWAYS run lint, test, build before PR. If any fail, loop back to Kimi.
+3. **ALWAYS send notification email** - On SUCCESS (PR created) OR FAILURE (task cannot complete). NEVER exit silently.
+4. **NEVER use `edit` or `write`** - Always call external agents
+5. **NEVER use `web_search` directly** - Only Claude Code has WebSearch. Call Claude via `exec`.
+6. **Claude Code FIRST** - Always research and plan before implementing
+7. **Internet research is MANDATORY** - Claude must use WebSearch (not you)
+8. **Follow the plan** - Kimi must implement exactly what Claude planned
+9. **⏱️ PATIENCE PROTOCOL** - NEVER KILL AGENTS PREMATURELY:
+   - Kimi K2.5: Wait **30 MINUTES minimum** (60 min for complex tasks)
+   - GLM-4.7: Wait **30 MINUTES minimum**
+   - Claude Code: Wait **30 MINUTES minimum**
+   - "No new output" means THINKING, not failure - THIS IS NORMAL
+   - Use FILE-BASED progress detection: `git status` and `find -mmin`
+   - ONLY kill if: 30+ min passed AND no file changes for 20+ min AND no errors
+   - **Anthropic recommends 60+ minute timeouts for thinking models**
+10. **Use `exec` for all agent calls** - claude, kimi, opencode, codex are CLI tools. Call them via bash.
 
 ---
 
@@ -449,27 +631,33 @@ EOF
 ```
 ALWAYS follow this order:
 
-1. Claude Code (Opus 4.5) - PAID
+1. Claude Code (Opus 4.5)
+   └─→ Analyze codebase first
    └─→ Research best practices 2026 (WebSearch)
-   └─→ Analyze codebase
    └─→ Generate implementation plan
 
-2. Kimi K2.5 - PAID (code only)
-   └─→ Implement following Claude's plan
-   └─→ NO tests, NO docs (GLM does that)
-   └─→ If fails → OpenCode → Claude Code CLI
+2. Kimi K2.5
+   └─→ Implement CODE ONLY following Claude's plan
+   └─→ Create migrations if needed
+   └─→ If fails → Claude Code CLI as fallback
 
-3. GLM-4.7 via OpenCode
-   └─→ Generate comprehensive tests
-   └─→ Generate documentation (JSDoc, docstrings, README)
-   └─→ Aim for 100% coverage
-   └─→ If fails → Kimi as backup
+3. GLM-4.7
+   └─→ Write tests for implementation
+   └─→ Add JSDoc/docstrings
+   └─→ If fails → Claude Code CLI as fallback
 
-4. Codex - PAID
+4. Codex
    └─→ Review code + tests against plan
    └─→ Approve or reject
 
-5. PR + Notification
+5. Build Verification (MANDATORY)
+   └─→ Run lint (must pass)
+   └─→ Run tests (must pass)
+   └─→ Run build (must compile)
+   └─→ If lint/build fail → Loop back to Kimi
+   └─→ If tests fail → Loop back to GLM-4.7
+
+6. PR + Notification
 ```
 
 ---
@@ -483,32 +671,33 @@ ALWAYS follow this order:
 1. **Create worktree**: `fix/speech-to-text-streaming`
 
 2. **Call Claude Code for research & planning**:
-   - Claude searches: "Deepgram Nova-3 WebSocket streaming best practices 2026"
-   - Claude searches: "React real-time audio transcription patterns"
    - Claude analyzes: `/api/realtime/token/route.ts`, `useRealtimeTranscription.ts`
-   - Claude reads: `CLAUDE.md`, `docs/10-voice-input.md`
+   - Claude reads: `CLAUDE.md`
+   - Claude searches: "Deepgram Nova-3 WebSocket streaming best practices 2026"
    - Claude outputs: Detailed plan with files, changes, tests
 
-3. **Call Kimi K2.5 with the plan** (code only):
-   - Kimi implements all code changes from Claude's plan
-   - Kimi does NOT write tests or documentation
+3. **Call Kimi K2.5 with the plan**:
+   - Kimi implements all code changes (code only)
+   - Kimi creates migrations if needed
 
 4. **Call GLM-4.7 for tests & docs**:
-   - GLM analyzes the implementation
-   - GLM generates unit tests
-   - GLM generates integration tests
-   - GLM adds JSDoc/docstrings to new functions
-   - GLM updates README if needed
-   - 100% coverage of new code
+   - GLM writes unit tests for the implementation
+   - GLM adds JSDoc/docstrings
 
 5. **Call Codex for review**:
    - Codex verifies plan compliance
    - Codex verifies test coverage
    - Codex approves
 
-6. **Create PR**: "Fix speech-to-text streaming with WebSocket token generation"
+6. **Run build verification**:
+   - `pnpm lint` → passes
+   - `pnpm test` → passes
+   - `pnpm run build` → compiles successfully
+   - (If lint/build fail → Kimi, if tests fail → GLM)
 
-7. **Send notification** with summary and research highlights
+7. **Create PR**: "Fix speech-to-text streaming with WebSocket token generation"
+
+8. **Send notification** with summary and research highlights
 
 ---
 
@@ -518,6 +707,65 @@ ALWAYS follow this order:
 |--------|---------------|
 | Using `edit` tool | You are orchestrator, not implementer |
 | Using `write` tool | You are orchestrator, not implementer |
+| Using `web_search` tool | Only Claude Code has WebSearch. Call `claude` via exec instead. |
+| Using `agents_spawn` | Use `exec` to call CLI tools (claude, kimi, opencode, codex) |
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
 | Ignoring Codex feedback | Quality matters |
+| **Killing agents before 30 min** | Kimi/GLM/Claude need 30-60 min. "No output" = thinking, NOT failure (Anthropic recommends 60 min) |
+| Using `process kill` based on "no output" | NEVER. Use git status to check file changes instead. No output is NORMAL. |
+| Marking session as "failed" without file check | Always check `git status` before declaring failure. Files changed = working. |
+| Killing multiple agents in sequence quickly | If first agent "fails", wait full timeout. Don't rapid-fire kill agents. |
+
+## How to Call Agents (IMPORTANT)
+
+You call agents via **bash exec**, NOT via internal tools:
+
+```bash
+# Claude Code for research/planning (from worktree directory):
+cd /path/to/worktree && claude -p "Your prompt as single string" --allowedTools "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+
+# Kimi for implementation + tests + docs:
+kimi --print -w /path/to/worktree -p "Your prompt as single string"
+
+# OpenCode fallback (if Kimi fails):
+cd /path/to/worktree && opencode run -m "kimi-for-coding/kimi-k2-thinking" "Your prompt"
+
+# Codex for review (must be in git repo):
+cd /path/to/worktree && codex exec "Your prompt as single string"
+```
+
+**CRITICAL:**
+- All paths must be ABSOLUTE (e.g., `/Users/jose/ai-worktrees/...`)
+- All prompts must be in QUOTES as a SINGLE STRING
+- Do NOT use heredocs, multiline, or complex escaping
+- Use `exec` tool to run these commands
+
+**⏱️ PATIENCE PROTOCOL WHEN POLLING AGENTS:**
+
+1. **Poll every 2-3 minutes** with `process poll`
+2. **"No new output" is NORMAL** - agents are in thinking mode
+3. **Check FILE CHANGES instead of stdout:**
+   ```bash
+   cd WORKTREE_PATH && git status --short
+   ```
+   If ANY files modified → Agent is WORKING → Keep waiting
+
+4. **MINIMUM WAIT TIMES (Anthropic recommends 60 min):**
+   - Kimi/OpenCode: **30 MINUTES minimum** (60 for complex tasks)
+   - GLM-4.7: **30 MINUTES minimum**
+   - Claude Code: **30 MINUTES minimum**
+
+5. **NEVER use `process kill` unless:**
+   - Full timeout elapsed (30+ min minimum)
+   - AND no file changes in worktree for 20+ minutes
+   - AND process shows no signs of activity
+   - AND you have checked `git status` confirms no modifications
+
+6. **Track elapsed time:**
+   ```bash
+   # Note start time when launching agent
+   # Before ANY kill decision, verify 30+ minutes elapsed (1800 seconds)
+   ```
+
+DO NOT use `agents_spawn`, `agents_list`, `web_search`, or similar internal tools.

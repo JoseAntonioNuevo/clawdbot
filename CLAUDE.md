@@ -47,9 +47,9 @@ cbot -v megrowth "with verbose output"
 | Agent | Model | Task | Why |
 |-------|-------|------|-----|
 | Orchestrator | GPT-5.2 | Coordinate workflow | 95% instruction following |
-| Research & Planning | Claude Opus 4.5 | WebSearch best practices 2026, analyze codebase, create plan | Native web search |
-| Implementation | Kimi K2.5 | Write code (only code, no tests/docs) | 76.8% SWE-bench |
-| Tests & Docs | GLM-4.7 | Generate tests, JSDoc, docstrings, README | 84.9% LiveCodeBench |
+| Research & Planning | Claude Opus 4.5 | Analyze codebase, WebSearch best practices 2026, create plan | Native web search |
+| Implementation | Kimi K2.5 | Write code only | 76.8% SWE-bench |
+| Tests & Docs | GLM-4.7 | Write tests, JSDoc, docstrings | 84.9% LiveCodeBench |
 | Code Review | Codex (GPT-5.2) | Review against plan, approve/reject | Structured JSON output |
 
 ## Branch Naming Conventions
@@ -69,14 +69,16 @@ Branches follow standard Git conventions based on task type:
 
 1. **User requests task** → `implement megrowth "fix bug X"`
 2. **GPT-5.2 creates worktree** → Branch: `fix/bug-x` (convention-based)
-3. **Claude Code researches** → WebSearch for 2026 best practices, analyzes codebase
+3. **Claude Code researches** → Analyzes codebase, WebSearch for 2026 best practices
 4. **Claude Code plans** → Detailed implementation plan
 5. **Kimi K2.5 implements** → Code only, following the plan
-6. **GLM-4.7 generates** → Tests + documentation
+6. **GLM-4.7 tests & docs** → Write tests, JSDoc/docstrings
 7. **Codex reviews** → Approve or provide feedback
-8. **Loop if needed** → Back to Kimi (code issues) or GLM (test issues)
-9. **GPT-5.2 creates PR** → Clean, human-like (no AI mentions)
-10. **GPT-5.2 notifies** → Email with full agent breakdown
+8. **Loop if needed** → Back to Kimi (code) or GLM (tests)
+9. **Build verification** → `lint`, `test`, `build` must ALL pass
+10. **Loop if build fails** → Kimi (lint/build) or GLM (tests)
+11. **GPT-5.2 creates PR** → Clean, human-like (no AI mentions)
+12. **GPT-5.2 notifies** → Email with full agent breakdown
 
 ## CLI Commands
 
