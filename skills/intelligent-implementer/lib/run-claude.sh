@@ -37,6 +37,8 @@ export CLAUDE_TOOLS="$ALLOWED_TOOLS"
 
 python3 - <<'PY'
 import os, pty
-cmd = ['/bin/bash','-lc','claude -p "$CLAUDE_PROMPT" --allowedTools "$CLAUDE_TOOLS"']
+prompt = os.environ.get('CLAUDE_PROMPT','')
+tools = os.environ.get('CLAUDE_TOOLS','Bash,Read,Glob,Grep,WebSearch,WebFetch')
+cmd = ['claude','-p', prompt, '--allowedTools', tools]
 pty.spawn(cmd)
 PY
