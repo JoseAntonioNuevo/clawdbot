@@ -43,12 +43,33 @@ echo "" > "$OUTPUT_FILE"
 echo "OpenCode started. Output will be written to: $OUTPUT_FILE"
 echo "Check status with: cat $STATUS_FILE"
 
-# Run OpenCode and capture output
-if opencode run -m "$MODEL" "$PROMPT" > "$OUTPUT_FILE" 2>&1; then
+# Run OpenCode with expect to create a PTY (needed for processes spawned without a controlling terminal)
+/usr/bin/expect -c "
+    log_user 1
+    set timeout -1
+    spawn opencode run -m {$MODEL} {$PROMPT}
+    expect eof
+    catch wait result
+    exit [lindex \$result 3]
+" 2>&1 | \
+    # Remove terminal control codes and escape sequences
+    perl -pe '
+        s/\e\[[0-9;]*[a-zA-Z]//g;
+        s/\e\][^\a\e]*(?:\a|\e\\)?//g;
+        s/\[\?[0-9]+[hl]//g;
+        s/\[<u//g;
+        s/\]9;[^;]*;[^;]*;//g;
+        s/[\x00-\x08\x0b\x0c\x0e-\x1f]//g;
+    ' | \
+    grep -v '^spawn opencode' | \
+    sed '/^$/d' | \
+    cat > "$OUTPUT_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+
+if [[ "$EXIT_CODE" -eq 0 ]]; then
     echo "COMPLETED" > "$STATUS_FILE"
     echo "=== OPENCODE COMPLETED ===" >> "$OUTPUT_FILE"
 else
-    EXIT_CODE=$?
     echo "ERROR:$EXIT_CODE" > "$STATUS_FILE"
     echo "=== OPENCODE FAILED (exit $EXIT_CODE) ===" >> "$OUTPUT_FILE"
 fi
