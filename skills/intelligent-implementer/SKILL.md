@@ -564,12 +564,13 @@ Focus on edge cases and error handling in tests."
 
 ### Step 4: Code Review with Codex
 
+**⚠️ THIS STEP IS BLOCKING - YOU MUST WAIT FOR CODEX TO COMPLETE AND PARSE ITS RESPONSE!**
+
 After Kimi's implementation AND GLM's tests/docs, review everything with Codex.
 
 **Command:**
 ```bash
-DIFF=$(cd WORKTREE_PATH && git diff BASE_BRANCH...HEAD)
-codex exec "Review the following code changes AND tests against this implementation plan:
+cd WORKTREE_PATH && DIFF=$(git diff BASE_BRANCH...HEAD) && codex exec "Review the following code changes AND tests against this implementation plan:
 
 PLAN:
 [paste the plan from Claude]
@@ -584,7 +585,7 @@ Verify:
 4. Tests cover all new functionality
 5. Test coverage is adequate (aim for 100% of new code)
 
-Respond in JSON:
+Respond ONLY with valid JSON (no other text):
 {
   \"approved\": true|false,
   \"issues\": [{\"file\": \"...\", \"message\": \"...\", \"severity\": \"high|medium|low\"}],
@@ -594,11 +595,111 @@ Respond in JSON:
 }"
 ```
 
-**Evaluation:**
-- If `approved: true` → Go to Step 5 (Build Verification)
-- If `approved: false` with code issues → Loop back to Step 2 (Kimi)
-- If `approved: false` with test/doc issues → Loop back to Step 3 (GLM-4.7)
-- If stuck (same issues 5 times) → Report failure
+**⛔ CRITICAL: YOU MUST WAIT FOR CODEX TO COMPLETE!**
+- Use `exec` with `timeout=600` (10 minutes for code review)
+- DO NOT proceed until Codex returns its JSON response
+- DO NOT create PR while Codex is still running
+
+**⛔ CRITICAL: YOU MUST PARSE THE JSON AND CHECK `approved` FIELD!**
+
+After Codex completes, extract the JSON from its output and check:
+
+```
+IF approved == false:
+    DO NOT proceed to Build Verification
+    DO NOT create PR
+    MUST loop back to fix the issues
+```
+
+**🔄 REJECTION LOOP (MANDATORY IF `approved: false`):**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CODEX RETURNED approved: false                                         │
+│                                                                         │
+│  1. READ the issues array carefully                                     │
+│  2. READ the missing_tests array carefully                              │
+│  3. DETERMINE the issue type:                                           │
+│     - Code issues (bugs, type errors, logic) → Go to Step 4a            │
+│     - Test issues (missing tests, poor coverage) → Go to Step 4b        │
+│     - Both → Do Step 4a first, then 4b                                  │
+│  4. After fixes, run Codex AGAIN (back to Step 4)                       │
+│  5. REPEAT until approved: true OR 5 iterations reached                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Step 4a: Fix Code Issues (when Codex rejects with code issues)**
+
+Call Kimi to fix the specific issues Codex identified:
+
+```bash
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-kimi.sh \
+  "WORKTREE_PATH" \
+  "TASK: Fix code issues identified by Codex code review.
+
+CODEX REVIEW RESULT:
+approved: false
+
+ISSUES TO FIX:
+[paste the issues array from Codex]
+
+ORIGINAL PLAN:
+[paste the plan from Claude]
+
+YOUR MISSION:
+1. Fix EACH issue listed above
+2. Do NOT change anything else
+3. Keep changes minimal and focused
+
+DO NOT write tests - another agent handles that."
+```
+
+Wait for Kimi to complete (check `.kimi-status.txt`).
+
+**Step 4b: Fix Test Issues (when Codex rejects with test issues)**
+
+Call GLM-4.7 to add/fix tests:
+
+```bash
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-opencode.sh \
+  "WORKTREE_PATH" \
+  "zai-coding-plan/glm-4.7" \
+  "TASK: Add missing tests identified by Codex code review.
+
+CODEX REVIEW RESULT:
+test_coverage: [paste value]
+
+MISSING TESTS:
+[paste the missing_tests array from Codex]
+
+ORIGINAL PLAN:
+[paste the plan from Claude]
+
+YOUR MISSION:
+1. Write tests for EACH item in missing_tests
+2. Follow existing test patterns in the codebase
+3. Focus on edge cases and error handling"
+```
+
+Wait for GLM-4.7 to complete (check `.opencode-status.txt`).
+
+**After fixing, RUN CODEX AGAIN (Step 4):**
+
+You MUST run Codex again after each fix iteration until you get `approved: true`.
+
+**Iteration tracking:**
+- Track how many times you've looped through Step 4
+- If 5 iterations with same issues → Report failure
+- Each iteration should show progress (fewer issues)
+
+**⛔ YOU CANNOT PROCEED TO BUILD VERIFICATION WITHOUT `approved: true`!**
+
+| Codex Result | Action |
+|--------------|--------|
+| `approved: true` | ✅ Proceed to Step 5 (Build Verification) |
+| `approved: false` | ❌ DO NOT proceed. Loop back to fix issues. |
+| Codex still running | ❌ DO NOT proceed. WAIT for completion. |
+| No JSON response | ❌ DO NOT proceed. Re-run Codex. |
 
 ---
 
@@ -650,15 +751,20 @@ Only proceed to Step 6 when all three pass.
 ### Step 6: Create PR
 
 **⛔ MANDATORY CHECKPOINT - BEFORE CREATING PR:**
-```
-AGENTS CHECKLIST (ALL must be checked):
-□ Claude Code - Did I run research & planning? (check .claude-status.txt = COMPLETED)
-□ Kimi K2.5 - Did I run implementation? (check .kimi-status.txt = COMPLETED)
-□ GLM-4.7 - Did I run tests & docs? (check .opencode-status.txt = COMPLETED)
-□ Codex - Did I run code review? (check codex returned JSON with "approved": true)
 
-If ANY checkbox is unchecked → STOP. Go back and run the missing agent.
-DO NOT CREATE PR without running ALL 4 agents.
+**YOU CANNOT CREATE A PR UNLESS ALL OF THESE ARE TRUE:**
+
+```
+AGENTS CHECKLIST (ALL must be TRUE):
+□ Claude Code completed? → .claude-status.txt = COMPLETED
+□ Kimi K2.5 completed? → .kimi-status.txt = COMPLETED
+□ GLM-4.7 completed? → .opencode-status.txt = COMPLETED
+□ Codex APPROVED? → Codex JSON had "approved": true  ← CRITICAL!
+
+⚠️ CODEX APPROVAL IS MANDATORY!
+- If Codex returned "approved": false → YOU CANNOT CREATE PR
+- You must loop back and fix issues until Codex says "approved": true
+- There is NO exception to this rule
 ```
 
 **⚠️ VERIFICATION COMMAND (RUN THIS BEFORE COMMIT):**
@@ -666,19 +772,28 @@ DO NOT CREATE PR without running ALL 4 agents.
 cd WORKTREE_PATH && echo "=== Agent Status Check ===" && \
   echo -n "Claude: "; cat .claude-status.txt 2>/dev/null || echo "NOT RUN"; \
   echo -n "Kimi: "; cat .kimi-status.txt 2>/dev/null || echo "NOT RUN"; \
-  echo -n "GLM-4.7: "; cat .opencode-status.txt 2>/dev/null || echo "NOT RUN"
+  echo -n "GLM-4.7: "; cat .opencode-status.txt 2>/dev/null || echo "NOT RUN"; \
+  echo "" && echo "=== CODEX APPROVAL STATUS ===" && \
+  echo "Did Codex return approved: true? (YOU MUST VERIFY THIS)"
 ```
 
-**Expected output (ALL must show COMPLETED):**
+**Expected output (ALL must be satisfied):**
 ```
 === Agent Status Check ===
 Claude: COMPLETED
 Kimi: COMPLETED
 GLM-4.7: COMPLETED
+
+=== CODEX APPROVAL STATUS ===
+Did Codex return approved: true? (YOU MUST VERIFY THIS)
 ```
 
-**If ANY shows "NOT RUN" → STOP and run the missing agent!**
-**If ANY shows "ERROR" → STOP and fix the issue!**
+**BLOCKING CONDITIONS - DO NOT CREATE PR IF:**
+- ANY agent shows "NOT RUN" → Run the missing agent
+- ANY agent shows "ERROR" → Fix the error
+- Codex returned `approved: false` → Loop back to fix issues (Step 4)
+- Codex is still running → WAIT for it to complete
+- You didn't check Codex JSON response → Go check it now
 
 ---
 
@@ -927,9 +1042,14 @@ ALWAYS follow this order:
 5. **Call Codex for review**:
    - Codex verifies plan compliance
    - Codex verifies test coverage
-   - Codex approves
+   - **IF Codex returns `approved: false`:**
+     - Read the issues array
+     - Code issues → Loop back to Kimi (step 3)
+     - Test issues → Loop back to GLM (step 4)
+     - After fixes, run Codex AGAIN
+   - **ONLY proceed when `approved: true`**
 
-6. **Run build verification**:
+6. **Run build verification** (only after Codex approves):
    - `pnpm lint` → passes
    - `pnpm test` → passes
    - `pnpm run build` → compiles successfully
@@ -955,6 +1075,9 @@ ALWAYS follow this order:
 | **🚨 Skipping GLM-4.7 (tests/docs)** | **FORBIDDEN.** Even if tests pass, GLM reviews/improves them. ALL 4 agents mandatory. |
 | **🚨 Skipping Codex (code review)** | **FORBIDDEN.** Even if build passes, Codex verifies quality. ALL 4 agents mandatory. |
 | Ignoring Codex feedback | Quality matters |
+| **🚨🚨 Creating PR when Codex said `approved: false`** | **ABSOLUTELY FORBIDDEN.** You MUST loop back and fix issues. This is the whole point of code review! |
+| **🚨🚨 Creating PR before Codex finishes** | **ABSOLUTELY FORBIDDEN.** You MUST wait for Codex to complete and return its JSON response. |
+| **🚨🚨 Not checking Codex JSON response** | **ABSOLUTELY FORBIDDEN.** You MUST parse the JSON and check `approved` field before proceeding. |
 | **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 3600` instead. It blocks premature kills. |
 | **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
 | Killing based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
@@ -1065,15 +1188,27 @@ Before you finish reading this document, remember:
    ```
    Even if tests pass or build succeeds, you MUST still call GLM-4.7 and Codex.
 
-3. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
+3. **YOU CANNOT CREATE PR WITHOUT CODEX APPROVAL** - This is the most critical rule:
+   ```
+   IF Codex returns approved: false → YOU CANNOT CREATE PR
+   YOU MUST loop back and fix the issues:
+   - Code issues → Kimi fixes → Run Codex again
+   - Test issues → GLM-4.7 fixes → Run Codex again
+   REPEAT until approved: true
+   ```
+   **YOU MUST WAIT for Codex to complete and check its response!**
+
+4. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
    ```bash
    /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600
    ```
 
-4. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
+5. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
 
-5. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
+6. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
 
 **These rules exist because you (GPT-5.2) have:**
 - Killed agents after 31 seconds (safe-kill.sh now prevents this)
 - Skipped GLM-4.7 and Codex steps (new checkpoints now prevent this)
+- Created PR before Codex finished reviewing (new blocking rules prevent this)
+- Created PR even when Codex said `approved: false` (new loop enforcement prevents this)
