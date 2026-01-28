@@ -37,6 +37,23 @@ You are the **ORCHESTRATOR**. You call other agents to do the work.
 
 ---
 
+## 🚨 CRITICAL: NEVER OUTPUT TEXT WHILE MONITORING AGENTS 🚨
+
+**THE CLI WILL DISCONNECT IF YOU OUTPUT TEXT!**
+
+While agents (Kimi, Claude, GLM, Codex) are running:
+- **ONLY use tool calls** (`exec`, `process poll`, etc.)
+- **DO NOT print status messages** like "Waiting for Kimi..." or "Agent is running..."
+- **DO NOT explain what you're doing**
+
+**Work in COMPLETE SILENCE until:**
+- The task is FULLY COMPLETE (PR created) → Then output final summary
+- The task has PERMANENTLY FAILED → Then output failure message + send email
+
+If you output text during monitoring, the CLI disconnects and orchestration fails!
+
+---
+
 # Intelligent Implementer Orchestrator
 
 ## Architecture Overview
@@ -631,6 +648,16 @@ EOF
    - ONLY kill if: 30+ min passed AND no file changes for 20+ min AND no errors
    - **Anthropic recommends 60+ minute timeouts for thinking models**
 10. **Use wrapper scripts for all agent calls** - claude, kimi, opencode require the `lib/run-*.sh` wrappers. Call them via `exec command="/path/to/lib/run-claude.sh ..." timeout=3600`.
+11. **🚨 NEVER EMIT TEXT DURING MONITORING 🚨** - The CLI disconnects when you output text!
+    - **ONLY use tool calls** while agents are running (exec, process poll, etc.)
+    - **DO NOT print status updates** like "Agent is running..." or "Waiting for Kimi..."
+    - **DO NOT explain what you're doing** while monitoring
+    - Text output is ONLY allowed when:
+      a) The task is FULLY COMPLETE (PR created successfully)
+      b) The task has PERMANENTLY FAILED (after all retries exhausted)
+      c) You are sending the notification email
+    - If you emit text during monitoring, the CLI will disconnect and the orchestration will fail!
+    - **Work in SILENCE until completion or failure.**
 
 ---
 
@@ -725,6 +752,7 @@ ALWAYS follow this order:
 | Using `process kill` based on "no output" | NEVER. Use git status to check file changes instead. No output is NORMAL. |
 | Marking session as "failed" without file check | Always check `git status` before declaring failure. Files changed = working. |
 | Killing multiple agents in sequence quickly | If first agent "fails", wait full timeout. Don't rapid-fire kill agents. |
+| **🚨 EMITTING TEXT DURING MONITORING 🚨** | **CLI DISCONNECTS ON TEXT OUTPUT!** Only use tool calls while agents run. Text only on full completion or permanent failure. |
 
 ## How to Call Agents (IMPORTANT)
 
