@@ -43,12 +43,30 @@ These rules are NON-NEGOTIABLE. Violating them causes task failure.
 - Text output = CLI disconnects = task fails
 - Output text ONLY after sending notification email
 
-## RULE 4: POLLING FREQUENCY
+## RULE 4: YOU MUST USE ALL 4 AGENTS (NO SKIPPING)
+The complete workflow requires ALL agents in order:
+```
+Claude Code → Kimi K2.5 → GLM-4.7 → Codex → Build → PR
+```
+**YOU CANNOT SKIP ANY AGENT.** Even if:
+- Kimi "already wrote tests" → Still call GLM-4.7 (it reviews/improves them)
+- Tests already pass → Still call Codex (it reviews code quality)
+- Build passes → Still need Codex approval first
+
+**BEFORE CREATING PR, VERIFY YOU CALLED:**
+1. ✅ Claude Code (Research & Planning)
+2. ✅ Kimi K2.5 (Implementation)
+3. ✅ GLM-4.7 (Tests & Documentation)
+4. ✅ Codex (Code Review with approval)
+
+If ANY agent was skipped → DO NOT CREATE PR. Go back and run the missing agent.
+
+## RULE 5: POLLING FREQUENCY
 - First 5 minutes: DO NOT poll at all
 - After 5 min: Poll every 3-5 MINUTES (not seconds)
-- Use FILE-BASED output detection (see Rule 5)
+- Use FILE-BASED output detection (see Rule 6)
 
-## RULE 5: FILE-BASED OUTPUT (CRITICAL)
+## RULE 6: FILE-BASED OUTPUT (CRITICAL)
 Clawdbot's `process poll` does NOT capture stdout properly. Agents write output to FILES.
 
 **Output files (in worktree):**
@@ -631,6 +649,18 @@ Only proceed to Step 6 when all three pass.
 
 ### Step 6: Create PR
 
+**⛔ MANDATORY CHECKPOINT - BEFORE CREATING PR:**
+```
+AGENTS CHECKLIST (ALL must be checked):
+□ Claude Code - Did I run research & planning? (check .claude-status.txt = COMPLETED)
+□ Kimi K2.5 - Did I run implementation? (check .kimi-status.txt = COMPLETED)
+□ GLM-4.7 - Did I run tests & docs? (check .opencode-status.txt = COMPLETED)
+□ Codex - Did I run code review? (check codex returned JSON with "approved": true)
+
+If ANY checkbox is unchecked → STOP. Go back and run the missing agent.
+DO NOT CREATE PR without running ALL 4 agents.
+```
+
 **1. Commit changes:**
 ```bash
 cd WORKTREE_PATH && git add -A && git commit -m "$(cat <<'EOF'
@@ -868,6 +898,8 @@ ALWAYS follow this order:
 | **Calling coding agents without wrapper scripts** | Claude/Kimi/OpenCode REQUIRE the wrapper scripts in `lib/`. |
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
+| **🚨 Skipping GLM-4.7 (tests/docs)** | **FORBIDDEN.** Even if tests pass, GLM reviews/improves them. ALL 4 agents mandatory. |
+| **🚨 Skipping Codex (code review)** | **FORBIDDEN.** Even if build passes, Codex verifies quality. ALL 4 agents mandatory. |
 | Ignoring Codex feedback | Quality matters |
 | **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 3600` instead. It blocks premature kills. |
 | **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
@@ -973,13 +1005,21 @@ Before you finish reading this document, remember:
 
 1. **YOU CANNOT WRITE CODE** - No `edit`, no `write`. Call agents instead.
 
-2. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
+2. **YOU CANNOT SKIP ANY AGENT** - ALL 4 agents are MANDATORY:
+   ```
+   Claude Code → Kimi K2.5 → GLM-4.7 → Codex → Build → PR
+   ```
+   Even if tests pass or build succeeds, you MUST still call GLM-4.7 and Codex.
+
+3. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
    ```bash
    /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600
    ```
 
-3. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
+4. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
 
-4. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
+5. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
 
-**These rules exist because you (GPT-5.2) killed an agent after 31 seconds last time, which broke the entire task. The safe-kill.sh wrapper now PREVENTS this mistake.**
+**These rules exist because you (GPT-5.2) have:**
+- Killed agents after 31 seconds (safe-kill.sh now prevents this)
+- Skipped GLM-4.7 and Codex steps (new checkpoints now prevent this)
