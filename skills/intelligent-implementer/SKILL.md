@@ -661,6 +661,27 @@ If ANY checkbox is unchecked → STOP. Go back and run the missing agent.
 DO NOT CREATE PR without running ALL 4 agents.
 ```
 
+**⚠️ VERIFICATION COMMAND (RUN THIS BEFORE COMMIT):**
+```bash
+cd WORKTREE_PATH && echo "=== Agent Status Check ===" && \
+  echo -n "Claude: "; cat .claude-status.txt 2>/dev/null || echo "NOT RUN"; \
+  echo -n "Kimi: "; cat .kimi-status.txt 2>/dev/null || echo "NOT RUN"; \
+  echo -n "GLM-4.7: "; cat .opencode-status.txt 2>/dev/null || echo "NOT RUN"
+```
+
+**Expected output (ALL must show COMPLETED):**
+```
+=== Agent Status Check ===
+Claude: COMPLETED
+Kimi: COMPLETED
+GLM-4.7: COMPLETED
+```
+
+**If ANY shows "NOT RUN" → STOP and run the missing agent!**
+**If ANY shows "ERROR" → STOP and fix the issue!**
+
+---
+
 **1. Commit changes:**
 ```bash
 cd WORKTREE_PATH && git add -A && git commit -m "$(cat <<'EOF'
@@ -696,6 +717,36 @@ EOF
 
 **YOU MUST send a notification email after creating the PR. This is NOT optional.**
 
+**⚠️ CRITICAL: Build the "Agents Used" list ONLY from agents that actually ran!**
+
+Before sending the email, check which status files exist in the worktree:
+```bash
+# Check which agents actually ran (status file exists AND contains COMPLETED)
+AGENTS_USED=""
+if [[ -f "WORKTREE_PATH/.claude-status.txt" ]] && grep -q "COMPLETED" "WORKTREE_PATH/.claude-status.txt"; then
+  AGENTS_USED="$AGENTS_USED\n- Claude Code (Opus 4.5): Research & Planning"
+fi
+if [[ -f "WORKTREE_PATH/.kimi-status.txt" ]] && grep -q "COMPLETED" "WORKTREE_PATH/.kimi-status.txt"; then
+  AGENTS_USED="$AGENTS_USED\n- Kimi K2.5: Implementation (code only)"
+fi
+if [[ -f "WORKTREE_PATH/.opencode-status.txt" ]] && grep -q "COMPLETED" "WORKTREE_PATH/.opencode-status.txt"; then
+  AGENTS_USED="$AGENTS_USED\n- GLM-4.7: Tests & Documentation"
+fi
+# Codex doesn't use status file - check if codex command was run and returned approved:true
+```
+
+**DO NOT copy-paste all 4 agents. Only list agents that ACTUALLY RAN.**
+
+If you skipped GLM-4.7, the email MUST show:
+```
+## Agents Used
+- Claude Code (Opus 4.5): Research & Planning
+- Kimi K2.5: Implementation (code only)
+⚠️ GLM-4.7 was SKIPPED (tests not written)
+- Codex: Code Review
+```
+
+**Full email template:**
 ```bash
 /Users/jose/clawd/skills/intelligent-implementer/lib/send-resend-email.sh \
   --to "$NOTIFY_EMAIL_TO" \
@@ -706,6 +757,8 @@ EOF
 Task: [task]
 Project: [project]
 PR: [url]
+Branch: [branch]
+Worktree: [worktree path]
 
 ## What was done
 [Summary of implementation]
@@ -713,11 +766,12 @@ PR: [url]
 ## Research Highlights
 [Key findings from Claude's research]
 
+## Testing
+[Build verification results: lint, test, build]
+
 ## Agents Used
-- Claude Code (Opus 4.5): Research & Planning
-- Kimi K2.5: Implementation (code only)
-- GLM-4.7: Tests & Documentation
-- Codex: Code Review
+[ONLY list agents that actually ran - check status files!]
+[If an agent was skipped, mark it with ⚠️ SKIPPED]
 
 Iterations: [N]
 EOF
