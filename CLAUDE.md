@@ -52,6 +52,23 @@ cbot -v megrowth "with verbose output"
 | Tests & Docs | GLM-4.7 | Write tests, JSDoc, docstrings | 84.9% LiveCodeBench |
 | Code Review | Codex (GPT-5.2) | Review against plan, approve/reject | Structured JSON output |
 
+## Fallback Strategy
+
+If Kimi K2.5 fails (rate limit, error, or no progress), Claude Code takes over implementation:
+
+```
+Kimi K2.5 fails (rate limit/error/timeout)
+    ↓
+Claude Code implements (using the plan from Step 1)
+    ↓
+Continue to GLM-4.7 (tests) as normal
+```
+
+**Rate limit indicators:**
+- Output contains "rate limit", "429", "quota exceeded"
+- Status file shows `ERROR:N`
+- No file changes after 30+ minutes
+
 ## Branch Naming Conventions
 
 Branches follow standard Git conventions based on task type:

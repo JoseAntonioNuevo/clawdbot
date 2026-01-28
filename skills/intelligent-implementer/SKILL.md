@@ -531,6 +531,64 @@ exec command="cd WORKTREE_PATH && git status --short" timeout=30
 
 **⚠️ DO NOT give up and do your own implementation!**
 
+---
+
+### Step 2-FALLBACK: Claude Code Implementation (If Kimi Fails)
+
+**Use this fallback when:**
+- Kimi status = `ERROR` (any error code)
+- Kimi output contains "rate limit", "429", "quota exceeded"
+- Kimi hasn't produced any file changes after 30+ minutes
+
+**Fallback command:**
+```bash
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "You are a senior software engineer implementing code changes.
+
+## TASK
+[Insert the user's original task description]
+
+## IMPLEMENTATION PLAN (FROM PREVIOUS RESEARCH)
+[Paste the IMPLEMENTATION_PLAN from Step 1]
+
+## YOUR MISSION
+1. Read CLAUDE.md first for project conventions
+2. Implement ALL code changes from the plan above
+3. If plan includes DATABASE MIGRATIONS: Create SQL files in supabase/migrations/ with timestamp filenames. DO NOT run them.
+4. Follow existing patterns in the codebase
+5. Make minimal, focused changes - only what the plan specifies
+
+DO NOT write tests or documentation - another agent will do that.
+DO NOT run database migrations - only create the files.
+DO NOT deviate from the plan unless absolutely necessary." \
+  "Bash,Read,Write,Edit,Glob,Grep"
+```
+
+**After Claude fallback completes:**
+- Check `.claude-status.txt` for COMPLETED
+- Verify files were changed with `git status`
+- Proceed to Step 3 (GLM-4.7) as normal
+
+```pseudocode
+# FALLBACK DECISION LOGIC
+IF Kimi STATUS == "ERROR" OR (RUNNING for 30+ min with no file changes):
+    # Check if rate limited
+    OUTPUT = cat WORKTREE_PATH/.kimi-output.txt
+
+    IF OUTPUT contains "rate limit" OR "429" OR "quota":
+        # Rate limited - use Claude fallback
+        RUN Step 2-FALLBACK (Claude implementation)
+    ELSE:
+        # Other error - still use Claude fallback
+        RUN Step 2-FALLBACK (Claude implementation)
+
+    # After fallback completes, continue to Step 3
+END IF
+```
+
+---
+
 ## 🚨🚨🚨 ABSOLUTE RULE: DO NOT KILL AGENTS BEFORE 3600 SECONDS (1 HOUR) 🚨🚨🚨
 
 **THIS IS NON-NEGOTIABLE. VIOLATION = TASK FAILURE.**
