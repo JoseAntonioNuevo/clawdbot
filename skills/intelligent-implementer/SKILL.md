@@ -143,10 +143,11 @@ Claude Code (Opus 4.5) will:
 3. **THEN**: Query Supabase schema if applicable
 4. **FINALLY**: Generate detailed implementation plan
 
-**Command:**
+**Command using wrapper script:**
 ```bash
-cd WORKTREE_PATH && claude -p "$(cat <<'EOF'
-You are a senior software architect preparing an implementation plan.
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "You are a senior software architect preparing an implementation plan.
 
 ## TASK
 [Insert the user's task description here]
@@ -171,7 +172,7 @@ NOW that you understand the codebase, search the internet for:
 - Security considerations
 
 Use WebSearch with SPECIFIC queries based on what you found in Phase 1.
-Example: If you found they use Deepgram + React, search "Deepgram WebSocket React best practices 2026"
+Example: If you found they use Deepgram + React, search 'Deepgram WebSocket React best practices 2026'
 
 ### Phase 3: Database Schema (IF SUPABASE PROJECT)
 If the project uses Supabase (check package.json or .env for supabase):
@@ -190,14 +191,13 @@ Combine your codebase analysis + research findings to create a detailed plan:
 1. Files to modify (with exact paths)
 2. Changes needed in each file (specific, not vague)
 3. New files to create (if any)
-4. **Database migrations needed** (if Supabase project)
+4. Database migrations needed (if Supabase project)
 5. Tests to add or update
 6. Potential edge cases to handle
 
 ## OUTPUT FORMAT
 Respond with a structured plan in this format:
 
-```
 ## RESEARCH FINDINGS
 [Key findings from internet search]
 
@@ -206,7 +206,6 @@ Respond with a structured plan in this format:
 
 ## DATABASE MIGRATIONS NEEDED (if Supabase)
 - Migration 1: [description] - supabase/migrations/YYYYMMDDHHMMSS_name.sql
-- Migration 2: [description] - supabase/migrations/YYYYMMDDHHMMSS_name.sql
 
 ## FILES TO MODIFY
 - path/to/file1.ts: [what to change]
@@ -218,7 +217,6 @@ Respond with a structured plan in this format:
 ## IMPLEMENTATION STEPS
 1. [First step with details]
 2. [Second step with details]
-...
 
 ## TESTS TO UPDATE
 - path/to/test.ts: [what to test]
@@ -229,15 +227,14 @@ Respond with a structured plan in this format:
 
 ## SECURITY CONSIDERATIONS
 - [Security item 1]
-```
 
 DO NOT implement anything. Only research and plan.
-DO NOT apply database migrations. Only plan them.
-EOF
-)" --allowedTools "Bash,Read,Glob,Grep,WebSearch,WebFetch,mcp__plugin_supabase_supabase__list_tables,mcp__plugin_supabase_supabase__execute_sql,mcp__plugin_supabase_supabase__list_migrations,mcp__plugin_supabase_supabase__list_projects"
+DO NOT apply database migrations. Only plan them." \
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch,mcp__plugin_supabase_supabase__list_tables,mcp__plugin_supabase_supabase__execute_sql,mcp__plugin_supabase_supabase__list_migrations,mcp__plugin_supabase_supabase__list_projects"
 ```
 
 **IMPORTANT:**
+- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
 - Claude Code MUST use `WebSearch` to find current best practices
 - Claude Code MUST read CLAUDE.md if it exists
 - Claude Code MUST query Supabase MCP if project uses Supabase
@@ -257,9 +254,11 @@ Pass the plan from Claude to Kimi K2.5 for **code implementation only**.
 - **NO tests** - GLM-4.7 will handle that
 - **NO documentation** - GLM-4.7 will handle that
 
-**Command:**
+**Command using wrapper script:**
 ```bash
-kimi --print -w WORKTREE_PATH -p "TASK: [original task]
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-kimi.sh \
+  "WORKTREE_PATH" \
+  "TASK: [original task]
 
 IMPLEMENTATION PLAN FROM CLAUDE:
 [paste the full plan here]
@@ -274,16 +273,10 @@ DO NOT write tests or documentation - another agent will do that.
 IMPORTANT: Do NOT run database migrations. Only create the files."
 ```
 
-**CRITICAL COMMAND FORMAT:**
-```bash
-kimi --print -w /full/path/to/worktree -p "Your prompt here as a single string"
-```
-
 **Rules:**
-- `-w` MUST come before `-p`
-- The prompt MUST be in quotes as a single string
-- Do NOT split the prompt across multiple arguments
-- Do NOT use heredocs or multiline - keep it simple
+- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
+- The prompt is passed as a single argument to the wrapper
+- The wrapper handles all quoting and TTY requirements
 
 **⏱️ PATIENCE PROTOCOL - CRITICAL - READ CAREFULLY:**
 
@@ -346,12 +339,18 @@ This is NORMAL behavior, NOT a failure.
 
 **If Kimi fails (ONLY after 30+ minutes AND no file changes for 20+ min), try OpenCode with Kimi model:**
 ```bash
-cd WORKTREE_PATH && opencode run -m "kimi-for-coding/kimi-k2-thinking" "Your prompt here"
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-opencode.sh \
+  "WORKTREE_PATH" \
+  "kimi-for-coding/kimi-k2-thinking" \
+  "Your prompt here"
 ```
 
 **If both fail, escalate to Claude Code:**
 ```bash
-cd WORKTREE_PATH && claude -p "TASK: [task]. PLAN: [plan]. Implement the code only." --allowedTools "Bash,Read,Write,Edit"
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "TASK: [task]. PLAN: [plan]. Implement the code only." \
+  "Bash,Read,Write,Edit"
 ```
 
 ---
@@ -365,15 +364,18 @@ After Kimi implements the code, call GLM-4.7 to write tests and documentation.
 - Add JSDoc/docstrings to new functions
 - Update README if needed
 
-**Command:**
+**Command using wrapper script:**
 ```bash
-cd WORKTREE_PATH && opencode run -m "zai-coding-plan/glm-4.7" "TASK: Write tests and documentation for the following implementation.
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-opencode.sh \
+  "WORKTREE_PATH" \
+  "zai-coding-plan/glm-4.7" \
+  "TASK: Write tests and documentation for the following implementation.
 
 ORIGINAL TASK: [task]
 
 IMPLEMENTATION PLAN: [plan from Claude]
 
-DIFF OF CHANGES: $(git diff BASE_BRANCH...HEAD)
+DIFF OF CHANGES: [paste git diff BASE_BRANCH...HEAD output here]
 
 YOUR MISSION:
 1. Read CLAUDE.md first for project conventions
@@ -385,6 +387,9 @@ YOUR MISSION:
 Focus on edge cases and error handling in tests."
 ```
 
+**IMPORTANT:**
+- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
+
 **⏱️ PATIENCE - WAIT FOR GLM-4.7:**
 - GLM-4.7 may take several minutes to generate comprehensive tests
 - **WAIT AT LEAST 30 MINUTES** before considering it stuck
@@ -393,7 +398,10 @@ Focus on edge cases and error handling in tests."
 
 **If GLM-4.7 fails (ONLY after 30+ minutes AND no file changes for 20+ min), fallback to Claude Code:**
 ```bash
-cd WORKTREE_PATH && claude -p "Write tests and documentation for the implementation. PLAN: [plan]" --allowedTools "Bash,Read,Write,Edit"
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "Write tests and documentation for the implementation. PLAN: [plan]" \
+  "Bash,Read,Write,Edit"
 ```
 
 ---
@@ -622,7 +630,7 @@ EOF
    - Use FILE-BASED progress detection: `git status` and `find -mmin`
    - ONLY kill if: 30+ min passed AND no file changes for 20+ min AND no errors
    - **Anthropic recommends 60+ minute timeouts for thinking models**
-10. **Use `exec` for all agent calls** - claude, kimi, opencode, codex are CLI tools. Call them via bash.
+10. **Use wrapper scripts for all agent calls** - claude, kimi, opencode require the `lib/run-*.sh` wrappers. Call them via `exec command="/path/to/lib/run-claude.sh ..." timeout=3600`.
 
 ---
 
@@ -709,6 +717,7 @@ ALWAYS follow this order:
 | Using `write` tool | You are orchestrator, not implementer |
 | Using `web_search` tool | Only Claude Code has WebSearch. Call `claude` via exec instead. |
 | Using `agents_spawn` | Use `exec` to call CLI tools (claude, kimi, opencode, codex) |
+| **Calling coding agents without wrapper scripts** | Claude/Kimi/OpenCode REQUIRE the wrapper scripts in `lib/`. Without them, they hang indefinitely. |
 | Skipping Claude research | Missing best practices leads to poor implementation |
 | Implementing without plan | Unplanned code is buggy code |
 | Ignoring Codex feedback | Quality matters |
@@ -719,27 +728,52 @@ ALWAYS follow this order:
 
 ## How to Call Agents (IMPORTANT)
 
-You call agents via **bash exec**, NOT via internal tools:
+You call agents via the **`exec` tool**, NOT via internal tools or raw bash.
 
+**⚠️ CRITICAL: USE WRAPPER SCRIPTS FOR ALL CODING AGENTS**
+
+Coding agents (claude, kimi, opencode) require a pseudo-terminal (PTY) to work correctly.
+The wrapper scripts in `lib/` use the `script` command to create a proper TTY environment.
+
+**Why wrappers are needed:**
+- Claude CLI hangs when spawned without a controlling terminal, even with node-pty
+- The `script` command creates a full pseudo-terminal session that satisfies TTY detection
+- See: https://github.com/anthropics/claude-code/issues/9026
+
+**CORRECT way to call coding agents (using wrappers):**
+```
+exec command="/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh '/path/to/worktree' 'Your prompt' 'Bash,Read,Glob,Grep,WebSearch,WebFetch'" timeout=3600
+```
+
+**Wrapper scripts:**
 ```bash
-# Claude Code for research/planning (from worktree directory):
-cd /path/to/worktree && claude -p "Your prompt as single string" --allowedTools "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+# Claude Code for research/planning:
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "/path/to/worktree" \
+  "Your prompt as single string" \
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch"
 
-# Kimi for implementation + tests + docs:
-kimi --print -w /path/to/worktree -p "Your prompt as single string"
+# Kimi for implementation:
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-kimi.sh \
+  "/path/to/worktree" \
+  "Your prompt as single string"
 
-# OpenCode fallback (if Kimi fails):
-cd /path/to/worktree && opencode run -m "kimi-for-coding/kimi-k2-thinking" "Your prompt"
+# OpenCode (GLM-4.7 for tests & docs, or Kimi fallback):
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-opencode.sh \
+  "/path/to/worktree" \
+  "zai-coding-plan/glm-4.7" \
+  "Your prompt"
 
-# Codex for review (must be in git repo):
+# Codex for review (does NOT need wrapper, must be in git repo):
 cd /path/to/worktree && codex exec "Your prompt as single string"
 ```
 
 **CRITICAL:**
+- **ALWAYS use wrapper scripts** for claude, kimi, and opencode commands
+- **ALWAYS use `timeout=3600`** (60 minutes) for coding agents
 - All paths must be ABSOLUTE (e.g., `/Users/jose/ai-worktrees/...`)
-- All prompts must be in QUOTES as a SINGLE STRING
-- Do NOT use heredocs, multiline, or complex escaping
-- Use `exec` tool to run these commands
+- Wrappers handle quote escaping automatically
+- Codex does NOT need a wrapper (it works fine without TTY)
 
 **⏱️ PATIENCE PROTOCOL WHEN POLLING AGENTS:**
 
