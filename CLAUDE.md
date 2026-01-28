@@ -352,31 +352,47 @@ If ANY shows "NOT RUN" → orchestrator must go back and run the missing agent.
 
 **PR creation is BLOCKED until Codex returns `approved: true`.**
 
-The orchestrator MUST:
-1. Wait for Codex to complete (cannot proceed while running)
-2. Parse the JSON response
-3. Check the `approved` field
-4. If `approved: false` → loop back to fix issues:
-   - Code issues → Kimi fixes → Run Codex again
-   - Test issues → GLM-4.7 fixes → Run Codex again
-5. Repeat until `approved: true`
-6. Only then proceed to build verification and PR
+The orchestrator follows a **hybrid approach** based on issue severity:
 
-**Why this matters:** GPT-5.2 was observed creating PRs before Codex finished, or even when Codex said `approved: false`. This defeats the entire purpose of code review. The PR from this behavior was broken (had type errors that Codex identified).
+### Full Loop (for serious issues)
+Triggered when:
+- Any issue has `severity: "high"`
+- `plan_compliance: "none"`
+- Same issues repeat 2+ times (stuck)
 
-**Rejection loop flow:**
+Flow:
 ```
-Codex returns approved: false
-    ↓
-Read issues array
-    ↓
-Code issues? → Kimi K2.5 fixes → Codex reviews again
-Test issues? → GLM-4.7 fixes → Codex reviews again
-    ↓
-Repeat until approved: true
-    ↓
-Then proceed to Build Verification
+Codex rejects → Claude analyzes + creates NEW plan → Kimi → GLM-4.7 → Codex
 ```
+
+### Quick Fix (for minor issues)
+Triggered when:
+- All issues `severity: "low"` or `"medium"`
+- `plan_compliance: "full"` or `"partial"`
+
+Flow:
+```
+Codex rejects → Kimi/GLM fixes directly → Codex reviews again
+```
+
+### Loop Logic
+```
+WHILE approved != true AND iterations < 5:
+    Run Codex review
+
+    IF approved == true:
+        EXIT → Build Verification → PR
+
+    IF severity HIGH or plan_compliance NONE or stuck:
+        → Claude (new plan) → Kimi → GLM → Codex
+    ELSE:
+        → Kimi/GLM quick fix → Codex
+
+IF iterations >= 5:
+    Send failure notification
+```
+
+**Why this matters:** GPT-5.2 was observed creating PRs before Codex finished, or even when Codex said `approved: false`. The hybrid approach ensures serious issues get proper analysis from Claude while minor issues can be fixed quickly.
 
 ## Iteration Limits
 
