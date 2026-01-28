@@ -1,8 +1,8 @@
 #!/bin/bash
-# Wrapper to run Kimi CLI with proper TTY using script command
+# Wrapper to run Kimi CLI with a proper TTY.
 #
-# Like Claude CLI, Kimi may require a controlling terminal to work correctly
-# when spawned from processes without a TTY.
+# BSD `script` can fail when stdio is a socket (tcgetattr/ioctl).
+# Use Python's `pty` to allocate a pseudo-terminal instead.
 #
 # Usage: run-kimi.sh <working-dir> <prompt>
 
@@ -25,11 +25,11 @@ if [[ ! -d "$WORKDIR" ]]; then
     exit 1
 fi
 
-# Use script to create proper TTY environment
-# -q: quiet mode (no "Script started" messages)
-# /dev/null: discard the typescript file
-# Export variables so they're available in the subshell, avoiding quote escaping issues
-# Kimi uses --print for non-interactive mode and -w for working directory
 export KIMI_WORKDIR="$WORKDIR"
 export KIMI_PROMPT="$PROMPT"
-exec script -q /dev/null /bin/bash -c 'kimi --print -w "$KIMI_WORKDIR" -p "$KIMI_PROMPT"'
+
+python3 - <<'PY'
+import pty
+cmd = ['/bin/bash','-lc','kimi --print -w "$KIMI_WORKDIR" -p "$KIMI_PROMPT"']
+pty.spawn(cmd)
+PY

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Wrapper to run Claude CLI with proper TTY using script command
+# Wrapper to run Claude CLI with a proper TTY.
 #
-# Claude CLI hangs when spawned without a controlling terminal, even with node-pty.
-# The `script` command creates a full pseudo-terminal session that satisfies Claude's
-# TTY detection requirements.
+# Historically we used the BSD `script` command to create a controlling terminal,
+# but in some environments (e.g., when stdio is a socket) `script` fails with:
+#   tcgetattr/ioctl: Operation not supported on socket
 #
-# See: https://github.com/anthropics/claude-code/issues/9026
+# This wrapper now uses Python's `pty` module to allocate a pseudo-terminal.
 #
 # Usage: run-claude.sh <working-dir> <prompt> [allowed-tools]
 
@@ -32,10 +32,11 @@ fi
 
 cd "$WORKDIR"
 
-# Use script to create proper TTY environment
-# -q: quiet mode (no "Script started" messages)
-# /dev/null: discard the typescript file (we don't need the recording)
-# Export variables so they're available in the subshell, avoiding quote escaping issues
 export CLAUDE_PROMPT="$PROMPT"
 export CLAUDE_TOOLS="$ALLOWED_TOOLS"
-exec script -q /dev/null /bin/bash -c 'claude -p "$CLAUDE_PROMPT" --allowedTools "$CLAUDE_TOOLS"'
+
+python3 - <<'PY'
+import os, pty
+cmd = ['/bin/bash','-lc','claude -p "$CLAUDE_PROMPT" --allowedTools "$CLAUDE_TOOLS"']
+pty.spawn(cmd)
+PY

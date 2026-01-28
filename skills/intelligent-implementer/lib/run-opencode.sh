@@ -1,8 +1,8 @@
 #!/bin/bash
-# Wrapper to run OpenCode CLI with proper TTY using script command
+# Wrapper to run OpenCode CLI with a proper TTY.
 #
-# Like Claude CLI, OpenCode may require a controlling terminal to work correctly
-# when spawned from processes without a TTY.
+# BSD `script` can fail when stdio is a socket (tcgetattr/ioctl).
+# Use Python's `pty` to allocate a pseudo-terminal instead.
 #
 # Usage: run-opencode.sh <working-dir> <model> <prompt>
 
@@ -27,12 +27,13 @@ if [[ ! -d "$WORKDIR" ]]; then
     exit 1
 fi
 
-cd "$WORKDIR"
-
-# Use script to create proper TTY environment
-# -q: quiet mode (no "Script started" messages)
-# /dev/null: discard the typescript file
-# Export variables so they're available in the subshell, avoiding quote escaping issues
 export OPENCODE_MODEL="$MODEL"
 export OPENCODE_PROMPT="$PROMPT"
-exec script -q /dev/null /bin/bash -c 'opencode run -m "$OPENCODE_MODEL" "$OPENCODE_PROMPT"'
+
+cd "$WORKDIR"
+
+python3 - <<'PY'
+import pty
+cmd = ['/bin/bash','-lc','opencode run -m "$OPENCODE_MODEL" "$OPENCODE_PROMPT"']
+pty.spawn(cmd)
+PY
