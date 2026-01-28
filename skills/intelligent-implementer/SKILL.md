@@ -646,7 +646,7 @@ IF approved == false:
 │                                                                             │
 │  3. After fixes, RUN CODEX AGAIN (Step 4)                                   │
 │  4. REPEAT this entire decision tree until approved: true                   │
-│  5. MAX 5 iterations total - after that, report failure                     │
+│  5. MAX 10 iterations total - after that, report failure                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -764,7 +764,7 @@ Then go directly to Codex review (Step 4).
 ITERATION = 0
 PREVIOUS_ISSUES = []
 
-WHILE approved != true AND ITERATION < 5:
+WHILE approved != true AND ITERATION < 10:
 
     RUN Codex review (Step 4)
     WAIT for completion
@@ -799,13 +799,13 @@ WHILE approved != true AND ITERATION < 5:
             RUN GLM-4.7 (Step 4b) → fix tests
         # Loop continues to Codex review
 
-IF ITERATION >= 5 AND approved != true:
+IF ITERATION >= 10 AND approved != true:
     SEND failure notification
     EXIT with error
 ```
 
 **Iteration tracking:**
-- Track iteration count (max 5)
+- Track iteration count (max 10)
 - Track if same issues repeat (triggers full loop after 2 repeats)
 - Each iteration should show progress (fewer issues or different issues)
 
@@ -943,8 +943,8 @@ REPEAT until ALL pass
 
 **Iteration tracking for build failures:**
 - Track build failure iterations separately
-- Max 5 build fix iterations
-- If 5 iterations and still failing → Send failure notification
+- Max 10 build fix iterations
+- If 10 iterations and still failing → Send failure notification
 
 ---
 
@@ -1422,7 +1422,7 @@ Before you finish reading this document, remember:
    - severity: LOW/MEDIUM → QUICK FIX
      Kimi/GLM fixes directly → Codex reviews again
 
-   REPEAT until approved: true (max 5 iterations)
+   REPEAT until approved: true (max 10 iterations)
    ```
    **YOU MUST WAIT for Codex to complete and check its response!**
    **The loop ONLY exits when approved: true!**

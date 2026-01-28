@@ -377,7 +377,7 @@ Codex rejects → Kimi/GLM fixes directly → Codex reviews again
 
 ### Loop Logic
 ```
-WHILE approved != true AND iterations < 5:
+WHILE approved != true AND iterations < 10:
     Run Codex review
 
     IF approved == true:
@@ -388,7 +388,7 @@ WHILE approved != true AND iterations < 5:
     ELSE:
         → Kimi/GLM quick fix → Codex
 
-IF iterations >= 5:
+IF iterations >= 10:
     Send failure notification
 ```
 
@@ -423,11 +423,11 @@ REPEAT until ALL pass
 | `test` | Optional | Skip, continue |
 | `build` | **MANDATORY** | Error - all projects need build |
 
-**Max iterations:** 5 build-fix cycles before failure notification.
+**Max iterations:** 10 build-fix cycles before failure notification.
 
 ## Iteration Limits
 
 - **Kimi K2.5**: Unlimited iterations for code fixes
 - **GLM-4.7**: Unlimited for test/doc fixes
-- **Stuck detection**: 5 identical failures → escalate to Claude Code
+- **Stuck detection**: 2 identical failures → escalate to Claude Code
 - **Claude Code fallback**: Max 10 iterations
