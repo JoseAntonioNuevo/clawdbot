@@ -41,12 +41,31 @@ echo "" > "$OUTPUT_FILE"
 echo "Kimi started. Output will be written to: $OUTPUT_FILE"
 echo "Check status with: cat $STATUS_FILE"
 
-# Run Kimi with expect to create a PTY (needed for processes spawned without a controlling terminal)
+# Run Kimi with expect to create a PTY and auto-approve permission prompts
 /usr/bin/expect -c "
     log_user 1
-    set timeout -1
+    set timeout 1800
     spawn kimi --print -w {$WORKDIR} -p {$PROMPT}
-    expect eof
+
+    # Loop to handle multiple permission prompts
+    while {1} {
+        expect {
+            -re {Permission required|Allow|Approve|y/n|Y/n|\[y\]|\[Y\]} {
+                send \"y\r\"
+                exp_continue
+            }
+            eof {
+                break
+            }
+            timeout {
+                if {[catch {exec kill -0 \$spawn_id} result]} {
+                    break
+                }
+                exp_continue
+            }
+        }
+    }
+
     catch wait result
     exit [lindex \$result 3]
 " 2>&1 | \

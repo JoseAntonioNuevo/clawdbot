@@ -43,12 +43,33 @@ echo "" > "$OUTPUT_FILE"
 echo "OpenCode started. Output will be written to: $OUTPUT_FILE"
 echo "Check status with: cat $STATUS_FILE"
 
-# Run OpenCode with expect to create a PTY (needed for processes spawned without a controlling terminal)
+# Run OpenCode with expect to create a PTY and auto-approve permission prompts
+# The expect script will automatically send "y" when it sees permission requests
 /usr/bin/expect -c "
     log_user 1
-    set timeout -1
+    set timeout 1800
     spawn opencode run -m {$MODEL} {$PROMPT}
-    expect eof
+
+    # Loop to handle multiple permission prompts
+    while {1} {
+        expect {
+            -re {Permission required|Allow|Approve|y/n|Y/n|\[y\]|\[Y\]} {
+                send \"y\r\"
+                exp_continue
+            }
+            eof {
+                break
+            }
+            timeout {
+                # Check if process is still running
+                if {[catch {exec kill -0 \$spawn_id} result]} {
+                    break
+                }
+                exp_continue
+            }
+        }
+    }
+
     catch wait result
     exit [lindex \$result 3]
 " 2>&1 | \
