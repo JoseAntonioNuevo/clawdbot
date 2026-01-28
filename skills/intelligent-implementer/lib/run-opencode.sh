@@ -1,8 +1,11 @@
 #!/bin/bash
-# Wrapper to run OpenCode CLI with a proper TTY.
+# Wrapper to run OpenCode CLI.
 #
-# BSD `script` can fail when stdio is a socket (tcgetattr/ioctl).
-# Use Python's `pty` to allocate a pseudo-terminal instead.
+# OpenCode CLI works fine without PTY.
+# This wrapper simply runs OpenCode with the correct arguments.
+#
+# Note: Do NOT use PTY wrappers (script, pty.spawn) - they cause output capture
+# issues when run through clawdbot's exec tool.
 #
 # Usage: run-opencode.sh <working-dir> <model> <prompt>
 
@@ -27,13 +30,7 @@ if [[ ! -d "$WORKDIR" ]]; then
     exit 1
 fi
 
-export OPENCODE_MODEL="$MODEL"
-export OPENCODE_PROMPT="$PROMPT"
-
 cd "$WORKDIR"
 
-python3 - <<'PY'
-import pty
-cmd = ['/bin/bash','-lc','opencode run -m "$OPENCODE_MODEL" "$OPENCODE_PROMPT"']
-pty.spawn(cmd)
-PY
+# Run OpenCode - works without PTY
+exec opencode run -m "$MODEL" "$PROMPT"

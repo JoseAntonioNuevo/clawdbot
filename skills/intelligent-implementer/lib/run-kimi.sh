@@ -1,8 +1,11 @@
 #!/bin/bash
-# Wrapper to run Kimi CLI with a proper TTY.
+# Wrapper to run Kimi CLI.
 #
-# BSD `script` can fail when stdio is a socket (tcgetattr/ioctl).
-# Use Python's `pty` to allocate a pseudo-terminal instead.
+# Kimi CLI works fine without PTY when using --print mode.
+# This wrapper simply runs Kimi with the correct arguments.
+#
+# Note: Do NOT use PTY wrappers (script, pty.spawn) - they cause output capture
+# issues when run through clawdbot's exec tool.
 #
 # Usage: run-kimi.sh <working-dir> <prompt>
 
@@ -25,11 +28,5 @@ if [[ ! -d "$WORKDIR" ]]; then
     exit 1
 fi
 
-export KIMI_WORKDIR="$WORKDIR"
-export KIMI_PROMPT="$PROMPT"
-
-python3 - <<'PY'
-import pty
-cmd = ['/bin/bash','-lc','kimi --print -w "$KIMI_WORKDIR" -p "$KIMI_PROMPT"']
-pty.spawn(cmd)
-PY
+# Run Kimi in print mode - works without PTY
+exec kimi --print -w "$WORKDIR" -p "$PROMPT"

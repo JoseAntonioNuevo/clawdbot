@@ -142,9 +142,9 @@ clawdbot/
         └── lib/
             ├── worktree.sh             # Git worktree helper
             ├── send-resend-email.sh    # Email via Resend
-            ├── run-claude.sh           # Claude CLI wrapper (TTY fix)
-            ├── run-kimi.sh             # Kimi CLI wrapper (TTY fix)
-            └── run-opencode.sh         # OpenCode CLI wrapper (TTY fix)
+            ├── run-claude.sh           # Claude CLI wrapper
+            ├── run-kimi.sh             # Kimi CLI wrapper
+            └── run-opencode.sh         # OpenCode CLI wrapper
 ```
 
 ## Key Files
@@ -163,7 +163,7 @@ The orchestrator instructions (~475 lines). Clawdbot reads this and executes aut
 
 **Critical Rules:**
 - Orchestrator NEVER uses `edit` or `write` tools
-- **Coding agents REQUIRE wrapper scripts** - Use `lib/run-claude.sh`, `lib/run-kimi.sh`, `lib/run-opencode.sh` (these handle TTY via `script` command)
+- **Coding agents use wrapper scripts** - Use `lib/run-claude.sh`, `lib/run-kimi.sh`, `lib/run-opencode.sh` for consistent CLI execution
 - Claude Code MUST use WebSearch for 2026 best practices
 - Claude Code queries Supabase MCP for live DB schema (if project uses Supabase)
 - Kimi K2.5 writes code AND migration files (no tests, no docs)
@@ -206,7 +206,7 @@ worktree.sh list --project PATH
 send-resend-email.sh --to EMAIL --subject "Subject" --body "Body"
 ```
 
-**`lib/run-claude.sh`** - Claude CLI wrapper (fixes TTY hanging issue):
+**`lib/run-claude.sh`** - Claude CLI wrapper:
 ```bash
 run-claude.sh <working-dir> <prompt> [allowed-tools]
 # Example:
@@ -225,8 +225,8 @@ run-opencode.sh <working-dir> <model> <prompt>
 run-opencode.sh /path/to/worktree "zai-coding-plan/glm-4.7" "Write tests"
 ```
 
-**Why wrappers are needed:**
-Claude CLI (and potentially other CLIs) hang when spawned without a controlling terminal, even with node-pty. The wrappers use the `script` command to create a proper TTY environment. See [GitHub #9026](https://github.com/anthropics/claude-code/issues/9026).
+**Why wrappers are used:**
+The wrappers ensure consistent argument passing and working directory handling. CLIs work fine in their non-interactive modes (`-p`, `--print`).
 
 ## Environment Variables
 

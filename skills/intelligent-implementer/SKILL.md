@@ -256,7 +256,7 @@ DO NOT apply database migrations. Only plan them." \
 ```
 
 **IMPORTANT:**
-- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
+- **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 - Claude Code MUST use `WebSearch` to find current best practices
 - Claude Code MUST read CLAUDE.md if it exists
 - Claude Code MUST query Supabase MCP if project uses Supabase
@@ -296,9 +296,9 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 ```
 
 **Rules:**
-- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
+- **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 - The prompt is passed as a single argument to the wrapper
-- The wrapper handles all quoting and TTY requirements
+- The wrapper handles all quoting requirements
 
 **⏱️ PATIENCE PROTOCOL - CRITICAL - READ CAREFULLY:**
 
@@ -410,7 +410,7 @@ Focus on edge cases and error handling in tests."
 ```
 
 **IMPORTANT:**
-- **Use `exec` with `timeout=3600`** - The wrapper script handles TTY via the `script` command
+- **Use `exec` with `timeout=3600`** - The wrapper script handles CLI execution
 
 **⏱️ PATIENCE - WAIT FOR GLM-4.7:**
 - GLM-4.7 may take several minutes to generate comprehensive tests
@@ -765,13 +765,12 @@ You call agents via the **`exec` tool**, NOT via internal tools or raw bash.
 
 **⚠️ CRITICAL: USE WRAPPER SCRIPTS FOR ALL CODING AGENTS**
 
-Coding agents (claude, kimi, opencode) require a pseudo-terminal (PTY) to work correctly.
-The wrapper scripts in `lib/` use the `script` command to create a proper TTY environment.
+The wrapper scripts in `lib/` ensure consistent CLI execution and argument handling.
 
 **Why wrappers are needed:**
-- Claude CLI hangs when spawned without a controlling terminal, even with node-pty
-- The `script` command creates a full pseudo-terminal session that satisfies TTY detection
-- See: https://github.com/anthropics/claude-code/issues/9026
+- Consistent argument passing and quoting
+- Proper working directory handling
+- CLIs work fine in their non-interactive modes (-p, --print)
 
 **CORRECT way to call coding agents (using wrappers):**
 ```
@@ -805,8 +804,8 @@ cd /path/to/worktree && codex exec "Your prompt as single string"
 - **ALWAYS use wrapper scripts** for claude, kimi, and opencode commands
 - **ALWAYS use `timeout=3600`** (60 minutes) for coding agents
 - All paths must be ABSOLUTE (e.g., `/Users/jose/ai-worktrees/...`)
-- Wrappers handle quote escaping automatically
-- Codex does NOT need a wrapper (it works fine without TTY)
+- Wrappers handle argument passing and working directory
+- Codex does NOT need a wrapper (works directly via bash)
 
 **⏱️ PATIENCE PROTOCOL WHEN POLLING AGENTS:**
 

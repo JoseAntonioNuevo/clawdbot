@@ -1,11 +1,11 @@
 #!/bin/bash
-# Wrapper to run Claude CLI with a proper TTY.
+# Wrapper to run Claude CLI.
 #
-# Historically we used the BSD `script` command to create a controlling terminal,
-# but in some environments (e.g., when stdio is a socket) `script` fails with:
-#   tcgetattr/ioctl: Operation not supported on socket
+# Claude CLI works fine without PTY when using -p (print mode).
+# This wrapper simply runs Claude with the correct arguments.
 #
-# This wrapper now uses Python's `pty` module to allocate a pseudo-terminal.
+# Note: Do NOT use PTY wrappers (script, pty.spawn) - they cause output capture
+# issues when run through clawdbot's exec tool. Claude -p works fine without PTY.
 #
 # Usage: run-claude.sh <working-dir> <prompt> [allowed-tools]
 
@@ -32,13 +32,5 @@ fi
 
 cd "$WORKDIR"
 
-export CLAUDE_PROMPT="$PROMPT"
-export CLAUDE_TOOLS="$ALLOWED_TOOLS"
-
-python3 - <<'PY'
-import os, pty
-prompt = os.environ.get('CLAUDE_PROMPT','')
-tools = os.environ.get('CLAUDE_TOOLS','Bash,Read,Glob,Grep,WebSearch,WebFetch')
-cmd = ['claude','-p', prompt, '--allowedTools', tools]
-pty.spawn(cmd)
-PY
+# Run Claude in print mode - works without PTY
+exec claude -p "$PROMPT" --allowedTools "$ALLOWED_TOOLS"
