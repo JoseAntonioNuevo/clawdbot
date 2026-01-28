@@ -822,9 +822,14 @@ IF ITERATION >= 5 AND approved != true:
 
 ### Step 5: Build Verification (MANDATORY)
 
-**Before creating a PR, ALL builds must pass. This is NOT optional.**
+**Before creating a PR, the build MUST pass. This is NOT optional.**
 
-**1. Detect package manager and run verification:**
+**⚠️ IMPORTANT: If build fails, treat it like Codex rejection with HIGH severity!**
+Build failures mean the code is broken - you MUST go back to Claude for analysis.
+
+---
+
+**1. Detect package manager and check what's available:**
 ```bash
 cd WORKTREE_PATH
 
@@ -837,31 +842,129 @@ else
   PKG_MGR="npm"
 fi
 
-# Run lint
-$PKG_MGR lint
-
-# Run tests
-$PKG_MGR test
-
-# Run build
-$PKG_MGR run build
+# Check if scripts exist in package.json
+HAS_LINT=$(grep -q '"lint"' package.json && echo "yes" || echo "no")
+HAS_TEST=$(grep -q '"test"' package.json && echo "yes" || echo "no")
 ```
 
-**2. If ANY check fails:**
-- DO NOT create PR
-- Analyze the error:
-  - **Lint fails** → Loop back to Step 2 (Kimi) - code issue
-  - **Build fails** → Loop back to Step 2 (Kimi) - code issue
-  - **Tests fail** → Loop back to Step 3 (GLM-4.7) - test issue
-- Include the FULL error message in your prompt
-- Example: "The tests failed with this error: [error]. Fix the tests."
+**2. Run verification (in order):**
 
-**3. Repeat until ALL checks pass:**
-- Lint must pass (no errors)
-- Tests must pass (all green)
-- Build must compile successfully
+```bash
+# 1. Run lint (ONLY if configured)
+if [[ "$HAS_LINT" == "yes" ]]; then
+  $PKG_MGR lint
+  # If fails → Go to Step 5-FIX
+fi
 
-Only proceed to Step 6 when all three pass.
+# 2. Run tests (ONLY if configured)
+if [[ "$HAS_TEST" == "yes" ]]; then
+  $PKG_MGR test
+  # If fails → Go to Step 5-FIX
+fi
+
+# 3. Run build (MANDATORY - must always run)
+$PKG_MGR run build
+# If fails → Go to Step 5-FIX
+```
+
+**Script not configured?** That's OK:
+- No `lint` script in package.json → Skip lint, continue
+- No `test` script in package.json → Skip tests, continue
+- No `build` script → **ERROR** - every project must have build
+
+**3. Priority of checks:**
+| Check | Required? | If fails |
+|-------|-----------|----------|
+| `lint` | Optional (if configured) | → Step 5-FIX |
+| `test` | Optional (if configured) | → Step 5-FIX |
+| `build` | **MANDATORY** | → Step 5-FIX |
+
+---
+
+**Step 5-FIX: Build Failure Loop (FULL LOOP BACK TO CLAUDE)**
+
+**⛔ If ANY verification fails, you MUST go back to Claude for analysis!**
+
+This is treated like a HIGH severity Codex rejection - you need a new plan.
+
+```bash
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "TASK: Analyze build/test/lint failure and create fix plan.
+
+ORIGINAL TASK: [the user's original task]
+
+BUILD VERIFICATION FAILED:
+[Which check failed: lint / test / build]
+
+ERROR OUTPUT:
+[Paste the FULL error message here]
+
+CURRENT CODE CHANGES:
+$(cd WORKTREE_PATH && git diff BASE_BRANCH...HEAD)
+
+YOUR MISSION:
+1. Analyze the error message carefully
+2. Understand WHY the build/test/lint failed
+3. Research best practices for fixing this specific error
+4. Create a detailed FIX PLAN that addresses the root cause
+5. Be specific about which files need changes and what changes
+
+The previous implementation broke the build. Your new plan must fix it.
+" \
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+```
+
+Wait for Claude to complete (check `.claude-status.txt`).
+
+Then run the FULL cycle again:
+1. **Kimi K2.5** implements Claude's fix plan
+2. **GLM-4.7** updates tests if needed
+3. **Codex** reviews the fix
+4. **Build Verification** runs again (Step 5)
+
+**🔄 BUILD FAILURE LOOP:**
+
+```
+BUILD/TEST/LINT FAILS
+    ↓
+Claude analyzes failure → creates fix plan
+    ↓
+Kimi implements fix
+    ↓
+GLM-4.7 updates tests (if needed)
+    ↓
+Codex reviews (must approve)
+    ↓
+Build Verification again (Step 5)
+    ↓
+REPEAT until ALL pass
+```
+
+**Iteration tracking for build failures:**
+- Track build failure iterations separately
+- Max 5 build fix iterations
+- If 5 iterations and still failing → Send failure notification
+
+---
+
+**4. Only proceed to Step 6 when:**
+- Lint passes (or not configured)
+- Tests pass (or not configured)
+- **Build MUST pass** (no exceptions)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ BUILD VERIFICATION CHECKLIST:                               │
+│                                                             │
+│ □ Lint: PASS or NOT_CONFIGURED                              │
+│ □ Tests: PASS or NOT_CONFIGURED                             │
+│ □ Build: PASS (MANDATORY)                                   │
+│                                                             │
+│ ALL checked? → Proceed to Step 6 (Create PR)                │
+│ ANY failed? → Go to Step 5-FIX (full loop)                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -1195,6 +1298,9 @@ ALWAYS follow this order:
 | **🚨🚨 Creating PR when Codex said `approved: false`** | **ABSOLUTELY FORBIDDEN.** You MUST loop back and fix issues. This is the whole point of code review! |
 | **🚨🚨 Creating PR before Codex finishes** | **ABSOLUTELY FORBIDDEN.** You MUST wait for Codex to complete and return its JSON response. |
 | **🚨🚨 Not checking Codex JSON response** | **ABSOLUTELY FORBIDDEN.** You MUST parse the JSON and check `approved` field before proceeding. |
+| **🚨🚨 Creating PR when build fails** | **ABSOLUTELY FORBIDDEN.** Build failures = broken code. Must loop back to Claude for analysis. |
+| **🚨🚨 Skipping build verification** | **ABSOLUTELY FORBIDDEN.** Build MUST pass before PR. Lint/test optional if not configured. |
+| **🚨🚨 Ignoring build/test/lint failures** | **ABSOLUTELY FORBIDDEN.** Any failure = full loop back to Claude → Kimi → GLM → Codex → Build. |
 | **🚨 Using `process kill` directly** | **FORBIDDEN.** Use `/lib/safe-kill.sh <PID> 3600` instead. It blocks premature kills. |
 | **🚨 Polling every few seconds** | **FORBIDDEN.** Wait 5 min before first poll. Then poll every 3-5 MINUTES, not seconds. |
 | Killing based on "no output" | **NEVER.** "No output" = agent is THINKING. This is normal. Check git status instead. |
@@ -1326,12 +1432,20 @@ Before you finish reading this document, remember:
    /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/safe-kill.sh <PID> 3600
    ```
 
-5. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
+5. **YOU CANNOT CREATE PR IF BUILD FAILS** - Build failures = full loop back:
+   ```
+   Build/Test/Lint fails → Claude analyzes → Kimi fixes → GLM tests → Codex → Build again
+   REPEAT until build passes
+   ```
+   Lint and tests are optional (if not configured). Build is MANDATORY.
 
-6. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
+6. **YOU CANNOT OUTPUT TEXT WHILE WORKING** - Only tool calls. Text = CLI disconnect.
+
+7. **POLL EVERY 3-5 MINUTES, NOT SECONDS** - First poll after 5 minutes.
 
 **These rules exist because you (GPT-5.2) have:**
 - Killed agents after 31 seconds (safe-kill.sh now prevents this)
 - Skipped GLM-4.7 and Codex steps (new checkpoints now prevent this)
 - Created PR before Codex finished reviewing (new blocking rules prevent this)
 - Created PR even when Codex said `approved: false` (new loop enforcement prevents this)
+- Would create PR with failing build (new build loop prevents this)
