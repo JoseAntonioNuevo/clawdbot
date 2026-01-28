@@ -614,23 +614,91 @@ IF approved == false:
 **🔄 REJECTION LOOP (MANDATORY IF `approved: false`):**
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  CODEX RETURNED approved: false                                         │
-│                                                                         │
-│  1. READ the issues array carefully                                     │
-│  2. READ the missing_tests array carefully                              │
-│  3. DETERMINE the issue type:                                           │
-│     - Code issues (bugs, type errors, logic) → Go to Step 4a            │
-│     - Test issues (missing tests, poor coverage) → Go to Step 4b        │
-│     - Both → Do Step 4a first, then 4b                                  │
-│  4. After fixes, run Codex AGAIN (back to Step 4)                       │
-│  5. REPEAT until approved: true OR 5 iterations reached                 │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CODEX RETURNED approved: false                                             │
+│                                                                             │
+│  1. READ the Codex JSON response carefully:                                 │
+│     - issues array (with severity: high|medium|low)                         │
+│     - plan_compliance (full|partial|none)                                   │
+│     - test_coverage (excellent|good|poor)                                   │
+│     - missing_tests array                                                   │
+│                                                                             │
+│  2. DETERMINE THE FIX PATH based on severity:                               │
+│                                                                             │
+│     ┌─────────────────────────────────────────────────────────────────────┐ │
+│     │ IF any issue has severity: "high"                                   │ │
+│     │ OR plan_compliance == "none"                                        │ │
+│     │ OR same issues repeated 2+ times                                    │ │
+│     │                                                                     │ │
+│     │ → FULL LOOP: Go back to Step 1 (Claude) for NEW PLAN               │ │
+│     │   Claude analyzes what went wrong + creates updated plan            │ │
+│     │   Then: Kimi → GLM-4.7 → Codex (full cycle)                        │ │
+│     └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│     ┌─────────────────────────────────────────────────────────────────────┐ │
+│     │ IF all issues have severity: "low" or "medium"                      │ │
+│     │ AND plan_compliance == "full" or "partial"                          │ │
+│     │                                                                     │ │
+│     │ → QUICK FIX: Go to Step 4a (Kimi) or 4b (GLM-4.7)                  │ │
+│     │   Direct fix without new plan                                       │ │
+│     │   Then: Codex review again                                          │ │
+│     └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  3. After fixes, RUN CODEX AGAIN (Step 4)                                   │
+│  4. REPEAT this entire decision tree until approved: true                   │
+│  5. MAX 5 iterations total - after that, report failure                     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Step 4a: Fix Code Issues (when Codex rejects with code issues)**
+---
 
-Call Kimi to fix the specific issues Codex identified:
+**Step 4-FULL: Full Loop Back to Claude (for HIGH severity or plan_compliance: none)**
+
+When Codex finds serious issues, you need a NEW PLAN from Claude:
+
+```bash
+/Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-claude.sh \
+  "WORKTREE_PATH" \
+  "TASK: Analyze Codex rejection and create UPDATED implementation plan.
+
+ORIGINAL TASK: [the user's original task]
+
+ORIGINAL PLAN: [paste your original plan]
+
+CODEX REJECTED WITH:
+approved: false
+plan_compliance: [value]
+issues: [paste full issues array]
+missing_tests: [paste array]
+
+CODEX FEEDBACK ANALYSIS:
+The code review found serious issues. You need to:
+1. Analyze WHY the implementation failed
+2. Research best practices for fixing these specific issues
+3. Create an UPDATED plan that addresses all Codex feedback
+4. Be specific about what needs to change and why
+
+OUTPUT: Updated implementation plan with:
+- Analysis of what went wrong
+- Research findings for the fix
+- Specific file changes needed
+- How to avoid the same issues
+" \
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+```
+
+Wait for Claude to complete (check `.claude-status.txt`).
+
+Then run the FULL cycle again:
+1. Kimi K2.5 implements the UPDATED plan
+2. GLM-4.7 writes/updates tests
+3. Codex reviews again
+
+---
+
+**Step 4a: Quick Fix - Code Issues (for LOW/MEDIUM severity)**
+
+For minor issues, Kimi can fix directly without a new plan:
 
 ```bash
 /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-kimi.sh \
@@ -639,6 +707,7 @@ Call Kimi to fix the specific issues Codex identified:
 
 CODEX REVIEW RESULT:
 approved: false
+severity: [low/medium - NOT high]
 
 ISSUES TO FIX:
 [paste the issues array from Codex]
@@ -655,10 +724,13 @@ DO NOT write tests - another agent handles that."
 ```
 
 Wait for Kimi to complete (check `.kimi-status.txt`).
+Then go directly to Codex review (Step 4).
 
-**Step 4b: Fix Test Issues (when Codex rejects with test issues)**
+---
 
-Call GLM-4.7 to add/fix tests:
+**Step 4b: Quick Fix - Test Issues (for missing tests)**
+
+For test coverage issues, GLM-4.7 can fix directly:
 
 ```bash
 /Users/jose/Documents/clawdbot/skills/intelligent-implementer/lib/run-opencode.sh \
@@ -682,15 +754,60 @@ YOUR MISSION:
 ```
 
 Wait for GLM-4.7 to complete (check `.opencode-status.txt`).
+Then go directly to Codex review (Step 4).
 
-**After fixing, RUN CODEX AGAIN (Step 4):**
+---
 
-You MUST run Codex again after each fix iteration until you get `approved: true`.
+**🔄 THE COMPLETE LOOP LOGIC:**
+
+```
+ITERATION = 0
+PREVIOUS_ISSUES = []
+
+WHILE approved != true AND ITERATION < 5:
+
+    RUN Codex review (Step 4)
+    WAIT for completion
+    PARSE JSON response
+
+    IF approved == true:
+        BREAK → Go to Step 5 (Build Verification)
+
+    ITERATION += 1
+
+    # Check if same issues repeating (stuck)
+    IF current_issues == PREVIOUS_ISSUES:
+        STUCK_COUNT += 1
+    ELSE:
+        STUCK_COUNT = 0
+
+    PREVIOUS_ISSUES = current_issues
+
+    # Determine fix path
+    IF any_issue_severity == "high" OR plan_compliance == "none" OR STUCK_COUNT >= 2:
+        # FULL LOOP - Need new plan
+        RUN Claude (Step 4-FULL) → new plan
+        RUN Kimi (Step 2) → implement new plan
+        RUN GLM-4.7 (Step 3) → write tests
+        # Loop continues to Codex review
+
+    ELSE:
+        # QUICK FIX
+        IF has_code_issues:
+            RUN Kimi (Step 4a) → fix code
+        IF has_test_issues:
+            RUN GLM-4.7 (Step 4b) → fix tests
+        # Loop continues to Codex review
+
+IF ITERATION >= 5 AND approved != true:
+    SEND failure notification
+    EXIT with error
+```
 
 **Iteration tracking:**
-- Track how many times you've looped through Step 4
-- If 5 iterations with same issues → Report failure
-- Each iteration should show progress (fewer issues)
+- Track iteration count (max 5)
+- Track if same issues repeat (triggers full loop after 2 repeats)
+- Each iteration should show progress (fewer issues or different issues)
 
 **⛔ YOU CANNOT PROCEED TO BUILD VERIFICATION WITHOUT `approved: true`!**
 
@@ -1191,12 +1308,18 @@ Before you finish reading this document, remember:
 3. **YOU CANNOT CREATE PR WITHOUT CODEX APPROVAL** - This is the most critical rule:
    ```
    IF Codex returns approved: false → YOU CANNOT CREATE PR
-   YOU MUST loop back and fix the issues:
-   - Code issues → Kimi fixes → Run Codex again
-   - Test issues → GLM-4.7 fixes → Run Codex again
-   REPEAT until approved: true
+
+   HYBRID FIX LOOP:
+   - severity: HIGH or plan_compliance: none → FULL LOOP back to Claude
+     Claude creates new plan → Kimi → GLM → Codex
+
+   - severity: LOW/MEDIUM → QUICK FIX
+     Kimi/GLM fixes directly → Codex reviews again
+
+   REPEAT until approved: true (max 5 iterations)
    ```
    **YOU MUST WAIT for Codex to complete and check its response!**
+   **The loop ONLY exits when approved: true!**
 
 4. **YOU CANNOT KILL AGENTS BEFORE 60 MINUTES (1 HOUR)** - Use safe-kill.sh, not `process kill`:
    ```bash
