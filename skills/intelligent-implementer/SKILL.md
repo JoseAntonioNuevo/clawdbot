@@ -80,6 +80,8 @@ Clawdbot's `process poll` does NOT capture stdout properly. Agents write output 
 - `RUNNING` = Agent still working
 - `COMPLETED` = Agent finished successfully
 - `ERROR:<code>` = Agent failed with exit code
+- `TIMEOUT:NO_ACTIVITY` = No output for 30 minutes (retryable)
+- `TIMEOUT:MAX_TIME` = Exceeded 60 minute maximum (retryable)
 
 **HOW TO CHECK AGENT PROGRESS:**
 ```bash
@@ -246,6 +248,66 @@ Generate identifiers:
 - `TASK_ID`: `$(date +%Y%m%d-%H%M%S)`
 - `BRANCH_NAME`: Use Git branch naming conventions based on task type:
 
+---
+
+## CHECKPOINT-BASED RESUME CAPABILITY
+
+**Before starting ANY workflow, check for existing checkpoint:**
+
+```pseudocode
+# ═══════════════════════════════════════════════════════════════════════════
+# CHECKPOINT RESUME CHECK (RUN THIS FIRST)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Check if worktree already exists with a checkpoint
+IF WORKTREE_PATH exists:
+    CHECKPOINT = exec "lib/checkpoint.sh load WORKTREE_PATH"
+
+    IF CHECKPOINT has current_step > 0:
+        # Resume from checkpoint!
+        RESUME_STEP = CHECKPOINT.current_step
+
+        # Verify previous step data is intact before resuming
+        IF RESUME_STEP == 1 AND file_exists(".claude-output.txt"):
+            IMPLEMENTATION_PLAN = read ".claude-output.txt"
+            SKIP TO STEP 2 (Kimi implementation)
+
+        IF RESUME_STEP == 2 AND .kimi-status.txt == "COMPLETED":
+            SKIP TO STEP 3 (GLM-4.7 tests)
+
+        IF RESUME_STEP == 3 AND .opencode-status.txt == "COMPLETED":
+            SKIP TO STEP 4 (Codex review)
+
+        IF RESUME_STEP == 4:
+            SKIP TO STEP 4 (Codex review - needs re-run)
+
+        IF RESUME_STEP >= 5:
+            SKIP TO STEP 5 (Build verification)
+
+ELSE:
+    # Fresh start - create new worktree and checkpoint
+    CREATE worktree
+    exec "lib/checkpoint.sh init WORKTREE_PATH TASK_ID PROJECT TASK_DESCRIPTION"
+```
+
+**Save checkpoint BEFORE each step:**
+```bash
+# Before Step 1: lib/checkpoint.sh save WORKTREE_PATH 1 in_progress
+# Before Step 2: lib/checkpoint.sh save WORKTREE_PATH 2 in_progress
+# etc.
+```
+
+**Mark step complete AFTER each step:**
+```bash
+# After Step 1: lib/checkpoint.sh complete-step WORKTREE_PATH 1
+# After Step 2: lib/checkpoint.sh complete-step WORKTREE_PATH 2
+# etc.
+```
+
+---
+
+### Branch Naming Conventions
+
 | Task Type | Prefix | Example |
 |-----------|--------|---------|
 | New feature | `feature/` | `feature/add-dark-mode` |
@@ -391,35 +453,60 @@ DO NOT apply database migrations. Only plan them." \
 **⏱️ STEP 1 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
 ```pseudocode
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 1: CLAUDE CODE POLLING LOOP
+# STEP 1: CLAUDE CODE POLLING LOOP (WITH RETRY FOR TIMEOUTS)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# 0. Save checkpoint before starting
+exec command="lib/checkpoint.sh save WORKTREE_PATH 1 in_progress"
+
 # 1. Start Claude agent
-exec command="run-claude.sh WORKTREE_PATH 'prompt'" timeout=3600
+RETRY_COUNT = 0
+MAX_RETRIES = 3
 
-# 2. Initial wait - DO NOT POLL during this time
-exec command="sleep 300" timeout=310
+RETRY_LOOP:
+    exec command="run-claude.sh WORKTREE_PATH 'prompt'" timeout=3600
 
-# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
-WHILE true:
-    # Check status file
-    STATUS = exec command="cat WORKTREE_PATH/.claude-status.txt" timeout=10
+    # 2. Initial wait - DO NOT POLL during this time
+    exec command="sleep 300" timeout=310
 
-    IF STATUS == "COMPLETED":
-        # ════════════════════════════════════════════════════════════════
-        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
-        # ════════════════════════════════════════════════════════════════
-        BREAK
+    # 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+    WHILE true:
+        # Check status file
+        STATUS = exec command="cat WORKTREE_PATH/.claude-status.txt" timeout=10
 
-    IF STATUS starts with "ERROR":
-        # Agent failed - read output for details, then decide how to proceed
-        exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
-        BREAK
+        IF STATUS == "COMPLETED":
+            # ════════════════════════════════════════════════════════════════
+            # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+            # ════════════════════════════════════════════════════════════════
+            BREAK
 
-    # STATUS is "RUNNING" - wait and poll again
-    exec command="sleep 180" timeout=200
+        IF STATUS starts with "TIMEOUT:":
+            # ════════════════════════════════════════════════════════════════
+            # TIMEOUT DETECTED - RETRY IF POSSIBLE
+            # ════════════════════════════════════════════════════════════════
+            RETRY_COUNT += 1
+            IF RETRY_COUNT < MAX_RETRIES:
+                exec command="sleep 60" timeout=70  # Wait before retry
+                GOTO RETRY_LOOP  # Restart the agent
+            ELSE:
+                # Max retries exceeded - fail the step
+                BREAK
 
-END WHILE
+        IF STATUS starts with "ERROR":
+            # Check if error is retryable (rate limit, network)
+            OUTPUT = exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
+            IF OUTPUT contains "rate limit" OR "429" OR "timeout":
+                RETRY_COUNT += 1
+                IF RETRY_COUNT < MAX_RETRIES:
+                    exec command="sleep 60" timeout=70
+                    GOTO RETRY_LOOP
+            # Permanent error - break
+            BREAK
+
+        # STATUS is "RUNNING" - wait and poll again
+        exec command="sleep 180" timeout=200
+
+    END WHILE
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
@@ -428,7 +515,10 @@ END WHILE
 # 4. Read the output file (ONLY after loop exits with COMPLETED)
 IMPLEMENTATION_PLAN = exec command="cat WORKTREE_PATH/.claude-output.txt" timeout=60
 
-# 5. IMMEDIATELY PROCEED TO STEP 2 - DO NOT POLL AGAIN
+# 5. Mark step complete
+exec command="lib/checkpoint.sh complete-step WORKTREE_PATH 1"
+
+# 6. IMMEDIATELY PROCEED TO STEP 2 - DO NOT POLL AGAIN
 # ═══════════════════════════════════════════════════════════════════════════
 # GO TO STEP 2: KIMI K2.5 IMPLEMENTATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -479,36 +569,73 @@ IMPORTANT: Do NOT run database migrations. Only create the files."
 **⏱️ STEP 2 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
 ```pseudocode
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 2: KIMI K2.5 POLLING LOOP
+# STEP 2: KIMI K2.5 POLLING LOOP (WITH RETRY AND FALLBACK)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# 0. Save checkpoint before starting
+exec command="lib/checkpoint.sh save WORKTREE_PATH 2 in_progress"
+
 # 1. Start Kimi agent
-exec command="run-kimi.sh WORKTREE_PATH 'prompt'" timeout=3600
+RETRY_COUNT = 0
+MAX_RETRIES = 3
+USE_FALLBACK = false
 
-# 2. Initial wait - DO NOT POLL during this time
-exec command="sleep 300" timeout=310
+RETRY_LOOP:
+    exec command="run-kimi.sh WORKTREE_PATH 'prompt'" timeout=3600
 
-# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
-WHILE true:
-    # Check status file
-    STATUS = exec command="cat WORKTREE_PATH/.kimi-status.txt" timeout=10
+    # 2. Initial wait - DO NOT POLL during this time
+    exec command="sleep 300" timeout=310
 
-    IF STATUS == "COMPLETED":
-        # ════════════════════════════════════════════════════════════════
-        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
-        # ════════════════════════════════════════════════════════════════
-        BREAK
+    # 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+    WHILE true:
+        # Check status file
+        STATUS = exec command="cat WORKTREE_PATH/.kimi-status.txt" timeout=10
 
-    IF STATUS starts with "ERROR":
-        # Agent failed - read output for details
-        exec command="cat WORKTREE_PATH/.kimi-output.txt" timeout=60
-        # Try fallback or handle error
-        BREAK
+        IF STATUS == "COMPLETED":
+            # ════════════════════════════════════════════════════════════════
+            # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+            # ════════════════════════════════════════════════════════════════
+            BREAK
 
-    # STATUS is "RUNNING" - wait and poll again
-    exec command="sleep 180" timeout=200
+        IF STATUS starts with "TIMEOUT:":
+            # ════════════════════════════════════════════════════════════════
+            # TIMEOUT DETECTED - RETRY OR FALLBACK
+            # ════════════════════════════════════════════════════════════════
+            RETRY_COUNT += 1
+            IF RETRY_COUNT < MAX_RETRIES:
+                exec command="sleep 60" timeout=70
+                GOTO RETRY_LOOP
+            ELSE:
+                # Max retries exceeded - use Claude fallback
+                USE_FALLBACK = true
+                BREAK
 
-END WHILE
+        IF STATUS starts with "ERROR":
+            # Check if error is retryable
+            OUTPUT = exec command="cat WORKTREE_PATH/.kimi-output.txt" timeout=60
+            IF OUTPUT contains "rate limit" OR "429" OR "quota":
+                RETRY_COUNT += 1
+                IF RETRY_COUNT < MAX_RETRIES:
+                    exec command="sleep 60" timeout=70
+                    GOTO RETRY_LOOP
+                ELSE:
+                    USE_FALLBACK = true
+                    BREAK
+            # Other error - use fallback
+            USE_FALLBACK = true
+            BREAK
+
+        # STATUS is "RUNNING" - wait and poll again
+        exec command="sleep 180" timeout=200
+
+    END WHILE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FALLBACK TO CLAUDE IF KIMI FAILED
+# ═══════════════════════════════════════════════════════════════════════════
+IF USE_FALLBACK:
+    # Run Claude Code as fallback implementer (see Step 2-FALLBACK)
+    RUN Step 2-FALLBACK
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
@@ -517,7 +644,10 @@ END WHILE
 # 4. Verify files were changed
 exec command="cd WORKTREE_PATH && git status --short" timeout=30
 
-# 5. IMMEDIATELY PROCEED TO STEP 3 - DO NOT POLL KIMI AGAIN
+# 5. Mark step complete
+exec command="lib/checkpoint.sh complete-step WORKTREE_PATH 2"
+
+# 6. IMMEDIATELY PROCEED TO STEP 3 - DO NOT POLL KIMI AGAIN
 # ═══════════════════════════════════════════════════════════════════════════
 # GO TO STEP 3: GLM-4.7 TESTS & DOCUMENTATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -703,36 +833,73 @@ Focus on edge cases and error handling in tests."
 **⏱️ STEP 3 POLLING LOOP - EXPLICIT PSEUDOCODE (FOLLOW EXACTLY):**
 ```pseudocode
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 3: GLM-4.7 POLLING LOOP
+# STEP 3: GLM-4.7 POLLING LOOP (WITH RETRY AND FALLBACK)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# 0. Save checkpoint before starting
+exec command="lib/checkpoint.sh save WORKTREE_PATH 3 in_progress"
+
 # 1. Start GLM-4.7 agent
-exec command="run-opencode.sh WORKTREE_PATH 'zai-coding-plan/glm-4.7' 'prompt'" timeout=3600
+RETRY_COUNT = 0
+MAX_RETRIES = 3
+USE_FALLBACK = false
 
-# 2. Initial wait - DO NOT POLL during this time
-exec command="sleep 300" timeout=310
+RETRY_LOOP:
+    exec command="run-opencode.sh WORKTREE_PATH 'zai-coding-plan/glm-4.7' 'prompt'" timeout=3600
 
-# 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
-WHILE true:
-    # Check status file
-    STATUS = exec command="cat WORKTREE_PATH/.opencode-status.txt" timeout=10
+    # 2. Initial wait - DO NOT POLL during this time
+    exec command="sleep 300" timeout=310
 
-    IF STATUS == "COMPLETED":
-        # ════════════════════════════════════════════════════════════════
-        # SUCCESS! EXIT THIS LOOP IMMEDIATELY
-        # ════════════════════════════════════════════════════════════════
-        BREAK
+    # 3. POLLING LOOP - MUST EXIT WHEN COMPLETED
+    WHILE true:
+        # Check status file
+        STATUS = exec command="cat WORKTREE_PATH/.opencode-status.txt" timeout=10
 
-    IF STATUS starts with "ERROR":
-        # Agent failed - read output for details
-        exec command="cat WORKTREE_PATH/.opencode-output.txt" timeout=60
-        # Handle error
-        BREAK
+        IF STATUS == "COMPLETED":
+            # ════════════════════════════════════════════════════════════════
+            # SUCCESS! EXIT THIS LOOP IMMEDIATELY
+            # ════════════════════════════════════════════════════════════════
+            BREAK
 
-    # STATUS is "RUNNING" - wait and poll again
-    exec command="sleep 180" timeout=200
+        IF STATUS starts with "TIMEOUT:":
+            # ════════════════════════════════════════════════════════════════
+            # TIMEOUT DETECTED - RETRY OR FALLBACK
+            # ════════════════════════════════════════════════════════════════
+            RETRY_COUNT += 1
+            IF RETRY_COUNT < MAX_RETRIES:
+                exec command="sleep 60" timeout=70
+                GOTO RETRY_LOOP
+            ELSE:
+                USE_FALLBACK = true
+                BREAK
 
-END WHILE
+        IF STATUS starts with "ERROR":
+            # Check if error is retryable
+            OUTPUT = exec command="cat WORKTREE_PATH/.opencode-output.txt" timeout=60
+            IF OUTPUT contains "rate limit" OR "429":
+                RETRY_COUNT += 1
+                IF RETRY_COUNT < MAX_RETRIES:
+                    exec command="sleep 60" timeout=70
+                    GOTO RETRY_LOOP
+                ELSE:
+                    USE_FALLBACK = true
+                    BREAK
+            # Other error - use fallback
+            USE_FALLBACK = true
+            BREAK
+
+        # STATUS is "RUNNING" - wait and poll again
+        exec command="sleep 180" timeout=200
+
+    END WHILE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FALLBACK TO CLAUDE IF GLM FAILED
+# ═══════════════════════════════════════════════════════════════════════════
+IF USE_FALLBACK:
+    # Run Claude Code as fallback for tests
+    exec command="run-claude.sh WORKTREE_PATH 'Write tests for implementation. PLAN: [plan]' 'Bash,Read,Write,Edit'"
+    # Poll Claude status...
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOOP HAS EXITED - DO NOT GO BACK INTO THE LOOP
@@ -741,7 +908,10 @@ END WHILE
 # 4. Verify test files were created
 exec command="cd WORKTREE_PATH && git status --short" timeout=30
 
-# 5. IMMEDIATELY PROCEED TO STEP 4 - DO NOT POLL GLM AGAIN
+# 5. Mark step complete
+exec command="lib/checkpoint.sh complete-step WORKTREE_PATH 3"
+
+# 6. IMMEDIATELY PROCEED TO STEP 4 - DO NOT POLL GLM AGAIN
 # ═══════════════════════════════════════════════════════════════════════════
 # GO TO STEP 4: CODEX CODE REVIEW
 # ═══════════════════════════════════════════════════════════════════════════
@@ -962,13 +1132,19 @@ Then go directly to Codex review (Step 4).
 
 ---
 
-**🔄 THE COMPLETE LOOP LOGIC:**
+**🔄 THE COMPLETE LOOP LOGIC (WITH CHECKPOINTS):**
 
 ```
+# Save checkpoint before Step 4
+exec command="lib/checkpoint.sh save WORKTREE_PATH 4 in_progress"
+
 ITERATION = 0
 PREVIOUS_ISSUES = []
 
 WHILE approved != true AND ITERATION < 10:
+
+    # Track iteration count in checkpoint
+    exec command="lib/checkpoint.sh increment WORKTREE_PATH codex_review"
 
     RUN Codex review (Step 4)
     WAIT for completion
@@ -1006,6 +1182,9 @@ WHILE approved != true AND ITERATION < 10:
 IF ITERATION >= 10 AND approved != true:
     SEND failure notification
     EXIT with error
+
+# Mark Step 4 complete
+exec command="lib/checkpoint.sh complete-step WORKTREE_PATH 4"
 ```
 
 **Iteration tracking:**
@@ -1127,10 +1306,16 @@ Then run the FULL cycle again:
 3. **Codex** reviews the fix
 4. **Build Verification** runs again (Step 5)
 
-**🔄 BUILD FAILURE LOOP:**
+**🔄 BUILD FAILURE LOOP (WITH CHECKPOINTS):**
 
 ```
+# Save checkpoint before Step 5
+exec command="lib/checkpoint.sh save WORKTREE_PATH 5 in_progress"
+
 BUILD/TEST/LINT FAILS
+    ↓
+# Track build fix iteration
+exec command="lib/checkpoint.sh increment WORKTREE_PATH build_fix"
     ↓
 Claude analyzes failure → creates fix plan
     ↓
@@ -1143,10 +1328,16 @@ Codex reviews (must approve)
 Build Verification again (Step 5)
     ↓
 REPEAT until ALL pass
+
+# Check iteration count before each attempt
+BUILD_FIX_COUNT = exec command="lib/checkpoint.sh get-counter WORKTREE_PATH build_fix"
+IF BUILD_FIX_COUNT >= 10:
+    SEND failure notification
+    EXIT with error
 ```
 
 **Iteration tracking for build failures:**
-- Track build failure iterations separately
+- Track build failure iterations in checkpoint: `lib/checkpoint.sh get-counter WORKTREE_PATH build_fix`
 - Max 10 build fix iterations
 - If 10 iterations and still failing → Send failure notification
 
@@ -1165,9 +1356,12 @@ REPEAT until ALL pass
 │ □ Tests: PASS or NOT_CONFIGURED                             │
 │ □ Build: PASS (MANDATORY)                                   │
 │                                                             │
-│ ALL checked? → Proceed to Step 6 (Create PR)                │
+│ ALL checked? → Mark Step 5 complete, Proceed to Step 6      │
 │ ANY failed? → Go to Step 5-FIX (full loop)                  │
 └─────────────────────────────────────────────────────────────┘
+
+# When build passes:
+exec command="lib/checkpoint.sh complete-step WORKTREE_PATH 5"
 ```
 
 ---
@@ -1248,6 +1442,11 @@ gh pr create \
 [How the changes were tested]
 EOF
 )"
+```
+
+**3. Mark Step 6 complete:**
+```bash
+lib/checkpoint.sh complete-step WORKTREE_PATH 6
 ```
 
 ---

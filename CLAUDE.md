@@ -159,10 +159,12 @@ clawdbot/
         └── lib/
             ├── worktree.sh             # Git worktree helper
             ├── send-resend-email.sh    # Email via Resend
-            ├── run-claude.sh           # Claude CLI wrapper
-            ├── run-kimi.sh             # Kimi CLI wrapper
-            ├── run-opencode.sh         # OpenCode CLI wrapper
-            └── safe-kill.sh            # Prevents premature agent kills
+            ├── run-claude.sh           # Claude CLI wrapper (with timeout)
+            ├── run-kimi.sh             # Kimi CLI wrapper (with timeout)
+            ├── run-opencode.sh         # OpenCode CLI wrapper (with timeout)
+            ├── safe-kill.sh            # Prevents premature agent kills
+            ├── checkpoint.sh           # Checkpoint save/load for resume
+            └── retry-with-backoff.sh   # Retry wrapper for transient errors
 ```
 
 ## Key Files
@@ -258,12 +260,22 @@ run-opencode.sh /path/to/worktree "zai-coding-plan/glm-4.7" "Write tests"
 
 **File-based output system:**
 Clawdbot's `exec` tool doesn't capture stdout properly from background processes. The wrappers now write output to files:
-- Status file (`.<agent>-status.txt`): Contains `RUNNING`, `COMPLETED`, or `ERROR:<code>`
+- Status file (`.<agent>-status.txt`): Contains status value (see below)
 - Output file (`.<agent>-output.txt`): Contains the agent's full output
+- PID file (`.<agent>-pid.txt`): Contains the process ID while running
+
+**Status values:**
+| Status | Meaning | Retryable? |
+|--------|---------|------------|
+| `RUNNING` | Agent still working | N/A |
+| `COMPLETED` | Agent finished successfully | N/A |
+| `ERROR:<code>` | Agent failed with exit code | Check output |
+| `TIMEOUT:NO_ACTIVITY` | No output for 30 minutes | Yes |
+| `TIMEOUT:MAX_TIME` | Exceeded 60 minute maximum | Yes |
 
 To check if an agent is done:
 ```bash
-cat /path/to/worktree/.claude-status.txt  # Returns: RUNNING, COMPLETED, or ERROR:N
+cat /path/to/worktree/.claude-status.txt  # Returns status value
 ```
 
 **`lib/safe-kill.sh`** - Prevents premature agent kills:
@@ -276,13 +288,57 @@ safe-kill.sh 12345 3600   # Explicit: 1 hour minimum
 
 GPT-5.2 tends to kill agents prematurely (after seconds instead of waiting). This wrapper enforces the minimum wait time at the system level - it will BLOCK kill attempts before the minimum time (default: 1 hour) has elapsed.
 
+**`lib/checkpoint.sh`** - Checkpoint management for resume capability:
+```bash
+# Initialize checkpoint for a new task
+checkpoint.sh init <worktree> <task_id> <project> [description]
+
+# Save checkpoint before each step
+checkpoint.sh save <worktree> <step> <status> [data_json]
+
+# Mark step as completed
+checkpoint.sh complete-step <worktree> <step>
+
+# Load checkpoint (returns JSON)
+checkpoint.sh load <worktree>
+
+# Get current step number
+checkpoint.sh get-step <worktree>
+
+# Increment iteration counter
+checkpoint.sh increment <worktree> <counter_name>
+
+# Get counter value
+checkpoint.sh get-counter <worktree> <counter_name>
+```
+
+Enables workflow resume after orchestrator crashes. Checkpoint file: `<worktree>/.checkpoint.json`
+
+**`lib/retry-with-backoff.sh`** - Retry wrapper for transient errors:
+```bash
+retry-with-backoff.sh [options] <command>
+# Options:
+#   --max-retries N     Maximum attempts (default: 3)
+#   --initial-delay N   Initial delay in seconds (default: 5)
+#   --max-delay N       Max delay cap in seconds (default: 300)
+#   --status-file F     File to check for rate limit indicators
+
+# Example:
+retry-with-backoff.sh --max-retries 3 -- curl https://api.example.com
+```
+
+Automatically retries on transient errors (timeouts, rate limits, network issues) with exponential backoff.
+
 **Why wrappers are used:**
 1. **PTY creation via expect** - CLIs hang when spawned from processes without a controlling terminal (like clawdbot gateway). The wrappers use `/usr/bin/expect` to create a pseudo-terminal.
 2. **File-based output capture** - Clawdbot's exec doesn't capture stdout properly from background processes. Output goes to `.claude-output.txt` etc.
 3. **Terminal code cleanup** - Removes ANSI escape sequences from output.
-4. **safe-kill wrapper** prevents premature agent kills.
+4. **Timeout monitoring** - Detects stuck agents (no activity for 30 min) and enforces max runtime (60 min).
+5. **safe-kill wrapper** prevents premature agent kills.
 
-**System requirement:** `/usr/bin/expect` must be available (standard on macOS).
+**System requirements:**
+- `/usr/bin/expect` must be available (standard on macOS)
+- `jq` for checkpoint JSON manipulation
 
 ## Environment Variables
 
@@ -448,3 +504,82 @@ REPEAT until ALL pass
 - **GLM-4.7**: Unlimited for test/doc fixes
 - **Stuck detection**: 2 identical failures → escalate to Claude Code
 - **Claude Code fallback**: Max 10 iterations
+
+## Resilience Features
+
+Clawdbot includes built-in resilience to handle failures gracefully:
+
+### 1. Timeout Detection
+
+Wrapper scripts monitor agent activity and detect stuck processes:
+- **No-activity timeout (30 min)**: If output file isn't modified for 30 minutes, agent is considered stuck
+- **Max-time timeout (60 min)**: Hard limit on agent runtime
+
+Status file will show `TIMEOUT:NO_ACTIVITY` or `TIMEOUT:MAX_TIME` when triggered.
+
+### 2. Retry with Backoff
+
+Transient errors are automatically retried:
+- Rate limits (429, "quota exceeded")
+- Timeouts and connection errors
+- Service unavailable (503)
+
+Retry behavior:
+- Max 3 retries per step
+- Exponential backoff: 5s → 10s → 20s → ... (capped at 5 min)
+- Permanent errors fail immediately without retry
+
+### 3. Checkpoint-Based Resume
+
+Workflow state is saved before each step:
+- Checkpoint file: `<worktree>/.checkpoint.json`
+- If orchestrator crashes, next run can resume from last checkpoint
+- Tracks: current step, completed steps, iteration counts
+
+Checkpoint format:
+```json
+{
+  "version": 1,
+  "task_id": "20260128-220810",
+  "project": "megrowth",
+  "current_step": 3,
+  "completed_steps": [0, 1, 2],
+  "iteration_counts": {
+    "codex_review": 0,
+    "build_fix": 0
+  }
+}
+```
+
+### 4. Fallback Strategy
+
+When primary agents fail:
+- **Kimi fails** → Claude Code implements (same plan)
+- **GLM-4.7 fails** → Claude Code writes tests
+- **Rate limits** → Retry up to 3 times, then fallback
+
+### Recovery Workflow
+
+```
+Agent starts
+    │
+    ├─► COMPLETED → Next step
+    │
+    ├─► TIMEOUT:* → Retry (up to 3x)
+    │       │
+    │       └─► Max retries → Fallback agent
+    │
+    └─► ERROR:* → Check if retryable
+            │
+            ├─► Rate limit/network → Retry
+            │
+            └─► Other error → Fallback agent
+```
+
+### Resume After Crash
+
+If orchestrator dies mid-workflow:
+1. Worktree and checkpoint file remain
+2. Re-run `implement project "same task"`
+3. Orchestrator detects existing checkpoint
+4. Resumes from last completed step
